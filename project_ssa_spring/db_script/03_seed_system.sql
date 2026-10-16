@@ -46,7 +46,7 @@ INSERT INTO MEMBER (
     MEMBER_ID, NAME, DEPARTMENT, PASSWORD, STATUS, FAIL_COUNT,
     PWD_CHG_DATE, LAST_LONG_DATE, REG_DATE, PHONE, EMAIL, PICTURE
 ) VALUES (
-    'admin', 'Administrator', 'System Administration',
+    'admin', 'Administrator', 'System Admin',
     '$2a$10$K7Ic0rIfCIedmCfpMZnz.OHsoGJ4xahBSpltndmTKfhdoBw1p6yHm',
     '0', 0, SYSDATE, NULL, SYSDATE, '010-0000-0000', 'admin@example.com', 'noImage.jpg'
 );
