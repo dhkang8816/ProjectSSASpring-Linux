@@ -7,10 +7,10 @@ import threading
 from queue import Empty, Full, Queue
 
 import requests
-from dotenv import load_dotenv
+from apps.environment import load_project_environment
 
 
-load_dotenv()
+load_project_environment()
 
 _notification_queue = Queue(maxsize=100)
 _notification_start_lock = threading.Lock()

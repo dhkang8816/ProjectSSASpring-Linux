@@ -243,6 +243,31 @@
 
 	<build>
 	    <plugins>
+	        <!-- A deployable WAR needs the ignored, machine-local JDBC settings.
+	             Check at packaging time so unit tests do not require DB secrets. -->
+	        <plugin>
+	            <groupId>org.apache.maven.plugins</groupId>
+	            <artifactId>maven-enforcer-plugin</artifactId>
+	            <version>3.5.0</version>
+	            <executions>
+	                <execution>
+	                    <id>require-local-jdbc-settings</id>
+	                    <phase>prepare-package</phase>
+	                    <goals><goal>enforce</goal></goals>
+	                    <configuration>
+	                        <rules>
+	                            <requireFilesExist>
+	                                <message>Create src/main/resources/com/spring/properties/jdbc.properties from the example before packaging. Keep credentials out of version control.</message>
+	                                <files>
+	                                    <file>${project.basedir}/src/main/resources/com/spring/properties/jdbc.properties</file>
+	                                    <file>${project.build.outputDirectory}/com/spring/properties/jdbc.properties</file>
+	                                </files>
+	                            </requireFilesExist>
+	                        </rules>
+	                    </configuration>
+	                </execution>
+	            </executions>
+	        </plugin>
 	
 	        <plugin>
 	            <groupId>org.apache.maven.plugins</groupId>

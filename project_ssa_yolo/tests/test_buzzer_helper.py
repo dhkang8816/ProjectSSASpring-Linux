@@ -93,7 +93,9 @@ class BuzzerHelperTest(unittest.TestCase):
                 active_calls -= 1
             return completed
 
-        with patch.object(buzzer_helper.subprocess, "run", side_effect=fake_subprocess_run):
+        # This test exercises queue serialization, independently of local USB devices.
+        with patch.object(runtime_settings, "validate_serial_port", side_effect=lambda value: value), \
+                patch.object(buzzer_helper.subprocess, "run", side_effect=fake_subprocess_run):
             sensor_thread = threading.Thread(target=sensor_helper._read_from_esp32)
             buzzer_thread = threading.Thread(
                 target=buzzer_helper._run_mpremote_command,

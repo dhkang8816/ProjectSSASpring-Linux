@@ -5,6 +5,7 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -75,7 +76,7 @@ public class FlaskRuntimeControlService {
 
             try {
                 ProcessBuilder processBuilder = new ProcessBuilder(
-                        RuntimeSettings.text("SSA_FLASK_PYTHON_EXECUTABLE", ""), "run_server.py");
+                        configuredAbsolutePath("SSA_FLASK_PYTHON_EXECUTABLE").toString(), "run_server.py");
                 processBuilder.directory(projectDirectory().toFile());
                 processBuilder.redirectErrorStream(true);
                 processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
@@ -84,7 +85,7 @@ public class FlaskRuntimeControlService {
                 startupRequested = true;
                 startupInitializationRequested = false;
                 return actionResult(true, "START_REQUESTED", "Flask 시작을 요청했습니다. 상태 확인을 기다립니다.");
-            } catch (IOException error) {
+            } catch (IOException | IllegalStateException | SecurityException error) {
                 return actionResult(false, "START_FAILED", "Flask를 시작하지 못했습니다. Python 실행 경로와 프로젝트 경로를 확인하세요.");
             }
         }
@@ -297,7 +298,7 @@ public class FlaskRuntimeControlService {
             return "원격 Flask 주소는 이 화면에서 제어할 수 없습니다.";
         }
         if (!projectReady) {
-            return "Flask 프로젝트 경로 또는 run_server.py 설정을 확인하세요.";
+            return projectConfigurationError();
         }
         if (!tokenReady) {
             return "Flask 제어 토큰 설정이 필요합니다.";
@@ -323,15 +324,33 @@ public class FlaskRuntimeControlService {
         if (controlError != null) {
             return controlError;
         }
-        if (!isProjectReady()) {
-            return "SSA_FLASK_PROJECT_DIR 및 SSA_FLASK_PYTHON_EXECUTABLE 설정을 확인하세요.";
-        }
-        return null;
+        return projectConfigurationError();
     }
 
     private boolean isProjectReady() {
-        String pythonExecutable = RuntimeSettings.text("SSA_FLASK_PYTHON_EXECUTABLE", "");
-        return !pythonExecutable.isBlank() && Files.isRegularFile(projectDirectory().resolve("run_server.py"));
+        return projectConfigurationError() == null;
+    }
+
+    String projectConfigurationError() {
+        try {
+            Path project = projectDirectory();
+            if (!Files.isDirectory(project) || !Files.isReadable(project) || !Files.isExecutable(project)) {
+                return "SSA_FLASK_PROJECT_DIR에 접근 가능한 프로젝트 디렉터리의 절대경로를 설정하세요.";
+            }
+            Path entryPoint = project.resolve("run_server.py");
+            if (!Files.isRegularFile(entryPoint) || !Files.isReadable(entryPoint)) {
+                return "SSA_FLASK_PROJECT_DIR 안에 읽을 수 있는 run_server.py가 필요합니다.";
+            }
+            Path executable = configuredAbsolutePath("SSA_FLASK_PYTHON_EXECUTABLE");
+            if (!Files.isRegularFile(executable) || !Files.isReadable(executable) || !Files.isExecutable(executable)) {
+                return "SSA_FLASK_PYTHON_EXECUTABLE에 읽고 실행할 수 있는 Python 파일의 절대경로를 설정하세요.";
+            }
+            return null;
+        } catch (IllegalStateException ex) {
+            return ex.getMessage();
+        } catch (SecurityException ex) {
+            return "SSA_FLASK_PROJECT_DIR 및 SSA_FLASK_PYTHON_EXECUTABLE 접근 권한을 확인하세요.";
+        }
     }
 
     private boolean hasControlToken() {
@@ -349,7 +368,23 @@ public class FlaskRuntimeControlService {
     }
 
     private Path projectDirectory() {
-        return Path.of(RuntimeSettings.text("SSA_FLASK_PROJECT_DIR", ""));
+        return configuredAbsolutePath("SSA_FLASK_PROJECT_DIR");
+    }
+
+    private static Path configuredAbsolutePath(String name) {
+        String configured = RuntimeSettings.text(name, "");
+        if (configured.isBlank()) {
+            throw new IllegalStateException(name + "에 절대경로를 설정하세요.");
+        }
+        try {
+            Path path = Path.of(configured);
+            if (!path.isAbsolute()) {
+                throw new IllegalStateException(name + "에는 현재 OS에서 유효한 절대경로가 필요합니다.");
+            }
+            return path.normalize();
+        } catch (InvalidPathException ex) {
+            throw new IllegalStateException(name + "의 경로 형식이 올바르지 않습니다.");
+        }
     }
 
     private String streamBaseUrl() {

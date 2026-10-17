@@ -248,5 +248,6 @@ def change_hybrid_source(source_key):
     """
     if not yolo_detector.is_known_source(source_key):
         return jsonify({"status": "FAIL", "error": "unknown source_key", "source_key": source_key}), 404
-    yolo_detector.set_default_source(source_key)
+    if not yolo_detector.set_default_source(source_key):
+        return jsonify({"status": "FAIL", "mode": source_key, **_status_payload()}), 503
     return jsonify({"status": "SUCCESS", "mode": source_key})

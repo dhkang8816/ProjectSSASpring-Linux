@@ -1,6 +1,7 @@
 package com.spring.service;
 
 import java.io.IOException;
+import java.io.File;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URI;
@@ -10,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -94,21 +96,63 @@ public class HeadlessChromePdfRenderer implements PatrolReportPdfRenderer {
     }
 
     private Path resolveBrowserExecutable() throws IOException {
-        String configured = RuntimeSettings.text("SSA_PDF_BROWSER_PATH", "");
-        if (!configured.isEmpty() && Files.isRegularFile(Path.of(configured))) {
-            return Path.of(configured);
+        return resolveBrowserExecutable(RuntimeSettings.text("SSA_PDF_BROWSER_PATH", ""),
+                System.getenv("PATH"), File.separatorChar == '\\');
+    }
+
+    static Path resolveBrowserExecutable(String configured, String searchPath, boolean windows) throws IOException {
+        if (configured != null && !configured.isBlank()) {
+            try {
+                Path path = Path.of(configured.trim());
+                if (!path.isAbsolute() || !isExecutableFile(path)) {
+                    throw new IOException("SSA_PDF_BROWSER_PATH must name an absolute, readable executable file.");
+                }
+                return path.normalize();
+            } catch (InvalidPathException | SecurityException ex) {
+                throw new IOException("SSA_PDF_BROWSER_PATH is not a valid accessible executable path.");
+            }
         }
-        for (String candidate : List.of(
+
+        if (windows) {
+            for (String candidate : List.of(
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
                 "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe")) {
-            Path path = Path.of(candidate);
-            if (Files.isRegularFile(path)) {
-                return path;
+                Path path = Path.of(candidate);
+                if (isExecutableFile(path)) {
+                    return path;
+                }
+            }
+        }
+
+        List<String> executableNames = windows
+                ? List.of("chrome.exe", "msedge.exe", "chromium.exe")
+                : List.of("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge");
+        if (searchPath != null) {
+            for (String entry : searchPath.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+                try {
+                    Path directory = Path.of(entry);
+                    // Empty or relative PATH entries depend on Tomcat's working directory.
+                    if (!directory.isAbsolute()) {
+                        continue;
+                    }
+                    for (String name : executableNames) {
+                        Path candidate = directory.resolve(name);
+                        if (isExecutableFile(candidate)) {
+                            return candidate.normalize();
+                        }
+                    }
+                } catch (InvalidPathException | SecurityException ignored) {
+                    // Other PATH entries may still contain a usable browser.
+                }
             }
         }
         throw new IOException("Chrome or Edge executable was not found. Configure SSA_PDF_BROWSER_PATH.");
+    }
+
+    private static boolean isExecutableFile(Path path) {
+        return Files.isRegularFile(path) && Files.isReadable(path) && Files.isExecutable(path);
     }
 
     private String waitForDebuggerWebSocket(int port, Process browser) throws IOException, InterruptedException {

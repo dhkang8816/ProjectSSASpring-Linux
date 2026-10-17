@@ -1,71 +1,37 @@
 # 업로드 저장소 운영 안내
 
-이 문서는 후속 작업 안내입니다. 아래 운영 명령은 이번 코드 수정에서 실행하지 않았습니다.
+Linux 업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`다. 운영 디렉터리 생성, 데이터 이동, 서비스 설정 변경·재시작은 수행하지 않았다. 전체 사용처는 [경로 점검](../PATH_CONFIGURATION_LINUX.md)을 참고한다.
 
 ## 경로와 호환성
 
-- 설정 이름: `SSA_UPLOAD_ROOT`
-- 적용 우선순위: JVM 시스템 속성(`-DSSA_UPLOAD_ROOT=...`) → 프로세스 환경변수 → OS 기본값
-- Linux 기본값: `/var/lib/project-ssa/uploads`
-- Windows 기본값: `C:\upload`
-- 설정값은 해당 OS의 절대경로여야 합니다. Linux에서 `C:/upload` 또는 상대경로는 거부합니다.
-- 하위 폴더: 직원 `member`, 동물 `animals`, 탐지 `detection`, 위험 `dangerlog`
-- 직원 파일명 `UUID$$원본파일명`, 동물 파일명 `UUID.확장자`, DB 파일명 값과 이미지 URL은 유지합니다.
-- 사진이 없거나 외부 저장소를 읽을 수 없으면 기존 외부 `noImage.jpg`, WAR 기본 이미지 순으로 조회합니다. 조회 요청은 디렉터리를 생성하거나 기본 이미지를 복사하지 않습니다.
-- 경로 구분자가 포함된 파일명과 저장 폴더 밖을 가리키는 심볼릭 링크는 읽기·저장·삭제 대상에서 제외합니다. 기존 DB 값을 일괄 수정하지 않습니다.
+- 설정 이름은 Spring과 Flask 모두 `SSA_UPLOAD_ROOT`이며 같은 물리 저장소를 가리켜야 한다.
+- Spring 우선순위는 JVM 시스템 속성 → 프로세스 환경변수다. Flask는 프로세스 환경변수 → 프로젝트 루트 `.env` 순서다. Spring은 Flask `.env`를 읽지 않는다.
+- Linux 업로드는 `SSA_UPLOAD_ROOT`, 캐시는 `SSA_CACHE_ROOT`로 기본값을 재정의할 수 있다. 명시한 상대경로·Windows 드라이브 경로는 오류 처리한다. Windows는 기존 업로드 기본값과 업로드 아래 PDF 캐시 기본 위치를 유지한다.
+- 설정 해석은 디렉터리를 생성하지 않는다. 일반 화면의 Spring 초기화를 유지하며 PDF 요청은 DB 캐시 조회·등록 전에 캐시 경로 설정을 검증한다.
+- 업로드 하위 폴더는 직원 `member`, 동물 `animals`, 탐지 `detection`, 위험 `dangerlog`다. PDF는 캐시 루트의 `pdf-cache/v4`를 사용한다. 파일명·DB 파일명 값·이미지 URL은 유지한다.
+- 사진이 없는 경우 기존 외부 `noImage.jpg`, WAR 기본 이미지 순으로 조회한다. 잘못된 경로·읽기 실패는 로그로 구분하며, 조회 요청은 디렉터리 생성이나 기본 이미지 복사를 하지 않는다.
+- 경로 구분자가 포함된 파일명과 저장 폴더 밖을 가리키는 심볼릭 링크는 저장소 처리 대상에서 제외한다. 기존 DB 값을 일괄 수정하지 않는다.
+- Flask는 디렉터리 생성·접근 또는 `cv2.imwrite` 실패를 실제 저장 성공으로 보고하지 않는다. 프레임 자체가 없을 때의 기존 `noImage.jpg` 계약은 유지한다.
 
-## Linux 운영자가 준비할 설정
+## Linux 운영자가 준비할 사항
 
-Tomcat 프로세스에 적용할 값은 다음과 같습니다. 일반 셸에서 `export`한 값은 이미 실행 중인 systemd 서비스에 자동 적용되지 않습니다. 기존 JVM 옵션에 잘못된 `-DSSA_UPLOAD_ROOT` 값이 있는지도 확인해야 합니다.
+실제 저장소가 정해지면 두 프로세스에 같은 `SSA_UPLOAD_ROOT`를 적용하고 공유 그룹·파일 읽기·쓰기 권한을 확인한다. 일반 셸의 `export`는 이미 실행 중인 systemd Tomcat에 자동 적용되지 않는다. 기존 JVM 속성이 환경변수보다 우선하는지도 확인해야 한다.
 
-```text
-SSA_UPLOAD_ROOT=/var/lib/project-ssa/uploads
-```
+PDF 캐시는 `SSA_CACHE_ROOT`로 별도 설정한다. 기존 업로드 아래 PDF나 DB의 과거 절대경로를 이동·삭제하지 않으며 새 캐시 루트 밖의 과거 PDF는 요청 시 재생성 대상이 된다.
 
-현재 서비스 파일에 선언된 실행 계정은 `tomcat:tomcat`입니다. 실제 서비스 계정을 확인한 뒤, 관리 권한 셸에서 다음 디렉터리를 준비할 수 있습니다. 이 명령에는 서비스 설정 변경·배포·재시작이 포함되지 않습니다.
+현재 Ubuntu 패키지 서비스는 `tomcat:tomcat`, `PrivateTmp=yes`, `ProtectSystem=strict`이다. 서비스의 기존 `ReadWritePaths` 예외가 제한되어 있으므로 외부 저장소는 디렉터리 권한 외에 systemd 쓰기 허용 설정도 운영자가 검토해야 한다. 이 문서는 실제 경로가 정해지기 전 생성·권한 변경 명령을 제안하지 않는다.
 
-```bash
-install -d -o tomcat -g tomcat -m 0750 /var/lib/project-ssa
-install -d -o tomcat -g tomcat -m 2770 \
-  /var/lib/project-ssa/uploads \
-  /var/lib/project-ssa/uploads/member \
-  /var/lib/project-ssa/uploads/animals \
-  /var/lib/project-ssa/uploads/detection \
-  /var/lib/project-ssa/uploads/dangerlog
-```
+기존 이미지가 다른 위치에 있으면 파일명·대소문자·한글·공백을 유지하는 보존 복사를 별도 계획한다. 원본·대상에 같은 이름의 파일이 있으면 먼저 비교하며 삭제·덮어쓰기·자동 이전을 하지 않는다. PDF DB에 기록된 과거 절대경로는 새 루트와 다를 수 있으므로 캐시 재생성 동작도 확인한다.
 
-스냅샷을 생성하는 별도 프로세스도 같은 물리 저장소와 같은 `SSA_UPLOAD_ROOT` 값을 사용해야 합니다. 두 프로세스의 공유 그룹 및 파일 읽기·쓰기 권한을 확인하십시오. 이번 수정에서는 Flask/YOLO 설정을 변경하지 않았습니다.
-
-`SSA_UPLOAD_ROOT`는 기존 PDF 캐시 코드에서도 사용합니다. 기존 환경변수를 바꾸면 PDF 캐시 위치에도 영향을 줄 수 있으므로 현재 설정과 캐시 경로를 확인하십시오. PDF 관련 코드는 수정하지 않았습니다.
-
-`web.xml`에 설정된 multipart 임시 저장소는 별개입니다. Tomcat의 웹 애플리케이션 임시 디렉터리에도 서비스 계정의 쓰기 권한이 필요합니다.
-
-## 기존 이미지 복사 명령 제안
-
-기존 `/opt/tomcat/C:/upload` 등은 변경하지 않았습니다. 새 루트로 바꾸면 과거 사진을 표시하려면 파일 복사가 필요할 수 있습니다. 아래 명령은 `rsync`가 설치된 서버에서 운영자가 검토 후 실행할 예시입니다. 다른 과거 저장 위치가 있으면 소스 경로를 실제 위치로 바꾸십시오.
-
-먼저 복사 예정 목록만 확인합니다.
-
-```bash
-for category in member animals detection dangerlog; do
-  source_dir="/opt/tomcat/C:/upload/$category/"
-  if [ -d "$source_dir" ]; then
-    rsync -rtv --no-links --ignore-existing --dry-run \
-      --chown=tomcat:tomcat --chmod=D2770,F0660 \
-      "$source_dir" "/var/lib/project-ssa/uploads/$category/"
-  fi
-done
-```
-
-검토 후 같은 명령에서 `--dry-run`만 제거하면 복사합니다. 원본 파일은 유지하고, 대상에 이미 있는 파일은 덮어쓰지 않습니다. 같은 파일명의 내용이 다른 경우에는 별도로 대조해야 합니다. `--delete`, `--remove-source-files`, `mv`는 사용하지 않습니다. 파일명과 대소문자, 한글·공백을 유지하십시오. PDF 캐시는 위 복사 대상에 포함하지 않았습니다.
+`web.xml` multipart와 PDF 브라우저 프로필의 임시 저장소는 영구 업로드와 별개다. 컨테이너/JVM 임시 디렉터리 접근 권한이 필요하며 Tomcat의 private `/tmp`를 Flask와 공유 저장소로 가정하면 안 된다.
 
 ## 검증
 
-프로젝트 디렉터리에서 Maven 테스트와 WAR 패키징을 수행할 수 있습니다.
+프로젝트 디렉터리에서 단위 테스트와 WAR 패키징을 수행할 수 있다. 패키징에는 로컬 JDBC 리소스 존재가 필요하지만 단위 테스트는 실제 Oracle에 접속하지 않는다.
 
 ```bash
 mvn test
-mvn -DskipTests package
+mvn verify
 ```
 
-운영 반영 후에는 로그인과 일반 CRUD, 기존 직원 사진 조회, 직원 사진 신규 등록·교체·초기화, 동물 사진 업로드·등록·수정, 탐지·위험 스냅샷, 기본 이미지, 재시작 후 조회를 확인하십시오. 실제 Windows 실행 및 운영 Tomcat/Oracle 연동은 단위 테스트와 구분하여 확인해야 합니다.
+실제 저장소가 정해지고 별도 운영 반영이 승인되면 직원·동물 사진 업로드/교체/조회, 탐지·위험 스냅샷, 기본 이미지, PDF, 재시작 후 조회를 검증한다. 실제 Windows 실행과 운영 Tomcat/Oracle/장비 연동은 단위 테스트 결과와 구분한다.

@@ -1,7 +1,7 @@
 """Serialize ESP32 buzzer commands without blocking YOLO workers.
 
 The ESP32 board is controlled through the configured ``mpremote`` serial port
-(``COM6`` by default).
+(Windows retains its ``COM6`` default; Linux requires an explicit device).
 Only this module invokes mpremote, and one daemon worker owns the queue so two
 threads never open the COM port concurrently.
 """
@@ -45,6 +45,12 @@ _ERROR_MESSAGES = {
 
 def run_mpremote(arguments, timeout=15, capture_output=False):
     """Run this interpreter's mpremote module without relying on PATH."""
+    arguments = list(arguments)
+    if "connect" in arguments:
+        index = arguments.index("connect") + 1
+        if index >= len(arguments):
+            raise runtime_settings.RuntimePathError("SSA_ESP32_COM_PORT must be configured")
+        arguments[index] = runtime_settings.validate_serial_port(arguments[index])
     command = [*_MPREMOTE_PREFIX, *arguments]
     with _mpremote_lock:
         return subprocess.run(

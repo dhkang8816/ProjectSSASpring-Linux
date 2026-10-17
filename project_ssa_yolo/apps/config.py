@@ -1,8 +1,16 @@
 import os
 import secrets
-from pathlib import Path
+from apps import runtime_settings
 
-basedir = Path(__file__).parent.parent
+def sqlite_database_uri(name, *, testing=False):
+    """Require an existing DB; tests without a file use an in-memory store."""
+    configured = os.getenv(name, "").strip()
+    if not configured and testing:
+        return "sqlite:///:memory:"
+    path = runtime_settings.readable_file(name, configured)
+    if not os.access(path, os.W_OK) or not os.access(path.parent, os.W_OK | os.X_OK):
+        raise runtime_settings.RuntimePathError(f"{name} and its parent must allow SQLite writes")
+    return f"sqlite:///{path.as_posix()}"
 
 
 def _secret(name, fallback=None):
@@ -18,16 +26,24 @@ class BaseConfig:
 
 # BaseConfig 클래스를 상속하여 LocalConfig 클래스를 작성한다
 class LocalConfig(BaseConfig):
-    SQLALCHEMY_DATABASE_URI= f"sqlite:///{basedir / 'local.sqlite'}"
+    SQLALCHEMY_DATABASE_URI = None
     SQLALCHEMY_TRACK_MODIFICATIONS=False
     SQLALCHEMY_ECHO=False
+
+    @classmethod
+    def database_uri(cls):
+        return sqlite_database_uri("SSA_SQLITE_PATH")
 
 
 # BaseConfig 클래스를 상속하여 TestingConfig 클래스를 작성한다
 class TestingConfig(BaseConfig):
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{basedir / 'testing.sqlite'}"
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     WTF_CSRF_ENABLED = False
+
+    @classmethod
+    def database_uri(cls):
+        return sqlite_database_uri("SSA_TEST_SQLITE_PATH", testing=True)
     
 # config 사전에 매핑한다
 config = {

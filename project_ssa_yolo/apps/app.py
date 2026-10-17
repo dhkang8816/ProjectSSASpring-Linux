@@ -44,7 +44,11 @@ atexit.register(_shutdown_optional_services)
 
 def create_app(config_key):
     app = Flask(__name__)
-    app.config.from_object(config[config_key])
+    selected_config = config[config_key]
+    app.config.from_object(selected_config)
+    # Validate only the selected store before SQLAlchemy initializes; unrelated
+    # testing/production paths must not prevent each other from starting.
+    app.config["SQLALCHEMY_DATABASE_URI"] = selected_config.database_uri()
 
     # Werkzeug's debug reloader creates a parent and a serving child process.
     # Defer USB workers until a real request, which only the serving process

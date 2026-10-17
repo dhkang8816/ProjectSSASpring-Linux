@@ -232,6 +232,17 @@ SEQ_PDF_CACHE
 
 ## 환경 설정
 
+### Linux / WSL2 경로 설정
+
+전체 사용처·복사 파일의 출처·남은 운영 작업은 [경로 점검 문서](PATH_CONFIGURATION_LINUX.md)를 참고합니다.
+업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`입니다. 기본 경로를 제안하고 코드에서 계산하며 운영 디렉터리 생성·권한 변경·데이터 이동은 하지 않습니다.
+
+- Spring과 Flask의 공유 업로드는 `SSA_UPLOAD_ROOT`, Spring PDF 캐시는 `SSA_CACHE_ROOT`로 재정의합니다. 경로는 절대경로여야 하며 없는 디렉터리를 설정 로딩이나 점검만으로 생성하지 않습니다. Windows는 기존 업로드 기본값과 업로드 루트 아래 PDF 캐시 기본 위치를 유지합니다.
+- 외부 모델·영상·DB는 `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`, `SSA_SQLITE_PATH`로 명시해야 합니다. 미설정 파일 경로를 추측하거나 빈 운영 DB를 생성하지 않습니다. Python 상대 파일 경로는 **저장소 루트** 기준이며 `project_ssa_yolo/` 기준이 아닙니다.
+- Flask는 프로젝트 루트 `.env`를 설정 import 전에 읽습니다. 프로세스 환경변수가 `.env`보다 우선하므로 Windows에서 복사한 로컬 설정을 Linux 실행 환경에서 덮어쓸 수 있습니다. Spring은 `.env`를 읽지 않으며 JVM 속성이 환경변수보다 우선합니다.
+- `SSA_ESP32_COM_PORT`는 해당 OS의 실제 장치로 지정합니다. Linux에서 Windows COM 이름이나 임의 USB 기본값을 사용하지 않습니다. HTTP 스트림은 별도 `SSA_ESP32_STREAM_URL`입니다.
+- systemd로 실행하는 Tomcat에는 일반 셸의 환경변수가 자동 전달되지 않습니다. 외부 저장소는 공유 권한과 Tomcat `ProtectSystem`/`ReadWritePaths` 제한을 함께 검토해야 합니다. 운영 설정 변경·재시작은 별도 작업입니다.
+
 ### Spring / Tomcat
 
 1. `project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties.example`을 참고해 같은 경로에 로컬 `jdbc.properties`를 만듭니다.
@@ -248,7 +259,8 @@ SEQ_PDF_CACHE
 | `SSA_FLASK_CONTROL_ENABLED` | 관리자 사이드바의 Flask 시작·종료 제어 기능 활성화 여부. 기본값은 `false` |
 | `SSA_FLASK_PROJECT_DIR`, `SSA_FLASK_PYTHON_EXECUTABLE` | Flask 시작 시 사용할 로컬 `project_ssa_yolo` 경로와 Python 실행 파일 절대 경로 |
 | `SSA_FLASK_CONTROL_TOKEN` | Flask 정상 종료 API를 보호하는 24자 이상의 별도 토큰. Flask `.env`에도 동일한 값을 설정 |
-| `SSA_UPLOAD_ROOT` | snapshot 및 PDF cache 저장 루트 |
+| `SSA_UPLOAD_ROOT` | 사진·snapshot 저장 루트. Spring과 Flask가 동일 저장소 사용 |
+| `SSA_CACHE_ROOT` | PDF cache 루트. Linux 기본값은 `/var/cache/project-ssa`이며 업로드와 별도 |
 | `SSA_PDF_BROWSER_PATH`, `SSA_PDF_RENDER_TIMEOUT_SECONDS` | Headless Chrome PDF 렌더링 설정 |
 | `SSA_DISCORD_INVITE_URL` | 공통 사이드바의 Discord 초대 링크. `RuntimeSettings`를 거쳐 모든 `menu.jsp`에 주입됩니다. |
 | `SSA_ENABLE_LEGACY_LABEL_EVENT_SIDE_EFFECTS` | legacy label event 부수효과 사용 여부 |
@@ -271,6 +283,7 @@ Copy-Item .env.example .env
 | Flask | `FLASK_APP`, `FLASK_RUN_HOST`, `FLASK_RUN_PORT`, `FLASK_RUN_EXTRA_ARGS`, `SSA_FLASK_SECRET_KEY`, `SSA_FLASK_CSRF_SECRET_KEY`, `SSA_FLASK_CONTROL_TOKEN` |
 | Spring callback | `SSA_SPRING_HOST` |
 | 영상/모델 | `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`, `SSA_ESP32_STREAM_URL`, `SSA_DEFAULT_VIDEO_SOURCE`, `SSA_YOLO_CONFIDENCE` |
+| SQLite | `SSA_SQLITE_PATH` (기존 파일을 사용하는 외부 저장소), `SSA_TEST_SQLITE_PATH` (테스트 전용) |
 | ESP32 | `SSA_ESP32_COM_PORT`, `SSA_ESP32_STREAM_URL`, `SSA_ESP32_HTTP_CONNECT_TIMEOUT_SECONDS`, `SSA_ESP32_HTTP_READ_TIMEOUT_SECONDS`, `SSA_ESP32_MJPEG_BUFFER_MAX_BYTES`, `SSA_ESP32_RECONNECT_INITIAL_SECONDS`, `SSA_ESP32_RECONNECT_MAX_SECONDS` |
 | 배터리 보정 | `SSA_BATTERY_ENABLED`, `SSA_BATTERY_SOURCE_KEY`, `SSA_BATTERY_ADC_PIN`, `SSA_BATTERY_ADC_REFERENCE_VOLTAGE`, `SSA_BATTERY_MIN_VOLTAGE`, `SSA_BATTERY_MAX_VOLTAGE`, `SSA_BATTERY_DIVIDER_RATIO`, `SSA_BATTERY_CALIBRATION`, `SSA_BATTERY_SAMPLE_COUNT` |
 | 배터리 상태/테스트 | `SSA_BATTERY_LOW_PERCENT`, `SSA_BATTERY_CRITICAL_PERCENT`, `SSA_BATTERY_MOCK_ENABLED`, `SSA_BATTERY_MOCK_PERCENT`, `SSA_BATTERY_DEBUG`, `SSA_BATTERY_DEBUG_INTERVAL_SECONDS` |
@@ -294,9 +307,9 @@ SSA_DEFAULT_VIDEO_SOURCE=video_1
 
 | 관제 채널 | 소스 종류 | 설정값 | 기본 경로 또는 주소 |
 | --- | --- | --- | --- |
-| `video_1` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_1_PATH` | `project_ssa_yolo/videos/streaming_0.mp4` |
-| `video_2` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_2_PATH` | `project_ssa_yolo/videos/streaming_3.mp4` |
-| `video_3` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_3_PATH` | `project_ssa_yolo/videos/streaming_2.mp4` |
+| `video_1` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_1_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
+| `video_2` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_2_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
+| `video_3` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_3_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
 | `esp32` | ESP32-CAM MJPEG 스트림 | `SSA_ESP32_STREAM_URL` | `http://192.168.0.100:80/stream` |
 
 - `video_1~3`은 각자 독립적인 `SourceWorker`가 처리하며, 하나의 파일 경로를 여러 채널에 설정할 수도 있습니다.
@@ -323,6 +336,18 @@ python -m pip install -r requirements.txt
 python run_server.py
 ```
 
+Linux에서는 실제 경로·주소 환경변수와 실행 의존성을 준비한 뒤 다음 절차를 사용합니다. 아래 가상환경 생성·패키지 설치·서버 시작은 운영자가 실행할 안내이며 이번 경로 점검에서 실행하지 않았습니다.
+
+```bash
+cd project_ssa_yolo
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python run_server.py
+```
+
+Python 실행 파일과 설치된 패키지/GPU 구성은 환경별로 확인해야 합니다. `.env`, `jdbc.properties`가 이미 있다면 예시 파일로 덮어쓰지 않습니다.
+
 `run_server.py`는 `.env`를 읽고 `create_app("local")`을 실행합니다. OpenCV/FFmpeg/serial worker 중복을 막기 위해 reloader 없이 단일 threaded Werkzeug 서버로 실행됩니다. YOLO 모델과 영상 파일은 `.env`의 경로에 실제로 준비되어 있어야 합니다.
 
 #### 메뉴 Flask ON/OFF 제어 (로컬 개발 환경 전용)
@@ -335,8 +360,8 @@ Eclipse에서는 **Servers → Tomcat → Open Launch Configuration → Environm
 # Tomcat Environment
 SSA_FLASK_CONTROL_ENABLED=true
 SSA_FLASK_STREAM_URL=http://localhost:5000/stream
-SSA_FLASK_PROJECT_DIR=C:/project_team3/workspaces/ProjectSSASpring/project_ssa_yolo
-SSA_FLASK_PYTHON_EXECUTABLE=C:/project_team3/build/envs/ssa310/python.exe
+SSA_FLASK_PROJECT_DIR=<project_ssa_yolo의_OS별_절대경로>
+SSA_FLASK_PYTHON_EXECUTABLE=<가상환경_Python의_OS별_절대경로>
 SSA_FLASK_CONTROL_TOKEN=24자_이상의_별도_랜덤_토큰
 
 # project_ssa_yolo/.env
@@ -409,7 +434,7 @@ mvn test
 
 ### 5. ESP32 연결 시 주의사항
 
-- COM 포트는 장비마다 다르므로 `SSA_ESP32_COM_PORT`로 지정합니다. `COM6`은 기본값일 뿐 필수값이 아닙니다.
+- 직렬 장치는 장비마다 다르므로 `SSA_ESP32_COM_PORT`로 지정합니다. Windows의 COM 기본값은 Windows 전용이며 Linux에서는 연결된 실제 장치의 절대경로와 접근 권한이 필요합니다.
 - Thonny 등 다른 도구가 동일한 serial port를 점유하면 `mpremote`와 충돌할 수 있습니다.
 - ESP32-CAM IP가 바뀌면 로컬 `.env`의 `SSA_ESP32_STREAM_URL`만 변경하고 Flask를 재시작합니다. `runtime_settings.py`는 `.env` 값이 없을 때만 쓰는 기본값이므로 장비 IP 변경마다 수정하지 않습니다.
 - 실제 ESP32 stream URL, 영상 경로, 모델 경로는 공개 저장소의 기본값에 의존하지 말고 로컬 `.env`에서 설정하세요.
@@ -455,7 +480,7 @@ Set-Location project_ssa_spring
 mvn test
 ```
 
-사용자 제공 Maven 실행 로그 기준으로 `mvn test`는 **Tests run: 55, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS**를 기록했습니다.
+최근 실행 범위와 결과는 [Spring 테스트 안내](project_ssa_spring/TESTING.md)를 참고합니다. 운영 연동 검증과 단위 테스트는 구분합니다.
 
 ### Python
 
@@ -468,7 +493,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-현재 코드 기준 로컬 실행 결과는 **30 passed**입니다. `test_lost_detection_clears_pending_timer_instead_of_firing_later`는 현재 정책(인식된 개 또는 고양이 프레임에서 두 보호종의 미달 여부를 함께 평가)과 일치하도록 기대값을 정리했습니다.
+최근 격리 실행 범위와 의존성 제한은 [Python 테스트 안내](project_ssa_yolo/TESTING.md)를 참고합니다. 실제 모델 추론·장비 통신은 단위 테스트에서 수행하지 않습니다.
 
 ## 주요 Trouble Shooting
 

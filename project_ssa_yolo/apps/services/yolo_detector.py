@@ -301,7 +301,8 @@ def _run_inference(frame):
     # avoids loading the same weights once per source.
     with _model_inference_lock:
         if _model is None:
-            _model = YOLO(runtime_settings.YOLO_MODEL_PATH)
+            model_path = runtime_settings.readable_file("SSA_YOLO_MODEL_PATH", runtime_settings.YOLO_MODEL_PATH)
+            _model = YOLO(str(model_path))
             print("[YOLO] shared model loaded")
         results = _model(frame, conf=runtime_settings.YOLO_CONFIDENCE, verbose=False)
 
@@ -354,6 +355,14 @@ class SourceWorker:
     def start(self):
         with self.capture_lock:
             if self.thread is not None and self.thread.is_alive():
+                return False
+            try:
+                runtime_settings.readable_file("SSA_YOLO_MODEL_PATH", runtime_settings.YOLO_MODEL_PATH)
+                if self.mode != "esp32":
+                    runtime_settings.readable_file(f"SSA_{self.source_key.upper()}_PATH", self.uri)
+            except runtime_settings.RuntimePathError as error:
+                self._set_error(error)
+                print(f"[YOLO:{self.source_key}] configuration error: {error}")
                 return False
             self.stop_event.clear()
             self.thread = threading.Thread(
@@ -421,7 +430,9 @@ class SourceWorker:
 
     def _open_capture(self):
         if self.mode != "esp32":
-            capture = cv2.VideoCapture(self.uri)
+            setting_name = f"SSA_{self.source_key.upper()}_PATH"
+            video_path = runtime_settings.readable_file(setting_name, self.uri)
+            capture = cv2.VideoCapture(str(video_path))
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             return capture
 
@@ -564,8 +575,8 @@ def start_source_worker(source_key):
     worker = _workers.get(source_key)
     if worker is None:
         return False
-    is_running = True
     worker.start()
+    is_running = any(item.status()["running"] for item in _workers.values())
     return worker.status()["running"]
 
 
@@ -607,7 +618,8 @@ def set_default_source(source_key):
     global _default_source_key, current_mode, current_source_path, source_changed
     if not is_known_source(source_key):
         return False
-    start_source_worker(source_key)
+    if not start_source_worker(source_key):
+        return False
     with _manager_lock:
         _default_source_key = source_key
         source_config = runtime_settings.VIDEO_SOURCES[source_key]

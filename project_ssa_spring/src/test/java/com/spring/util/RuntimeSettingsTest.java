@@ -18,10 +18,12 @@ class RuntimeSettingsTest {
     Path temporaryDirectory;
 
     private String originalUploadRoot;
+    private String originalCacheRoot;
 
     @BeforeEach
     void rememberUploadRoot() {
         originalUploadRoot = System.getProperty("SSA_UPLOAD_ROOT");
+        originalCacheRoot = System.getProperty("SSA_CACHE_ROOT");
     }
 
     @AfterEach
@@ -31,16 +33,55 @@ class RuntimeSettingsTest {
         } else {
             System.setProperty("SSA_UPLOAD_ROOT", originalUploadRoot);
         }
+        if (originalCacheRoot == null) {
+            System.clearProperty("SSA_CACHE_ROOT");
+        } else {
+            System.setProperty("SSA_CACHE_ROOT", originalCacheRoot);
+        }
     }
 
     @Test
-    void usesPlatformSpecificDefaultWhenNotConfigured() {
+    void retainsWindowsDevelopmentDefaultWhenNotConfigured() {
+        assumeTrue(File.separatorChar == '\\');
         String environmentRoot = System.getenv("SSA_UPLOAD_ROOT");
         assumeTrue(environmentRoot == null || environmentRoot.isBlank());
         System.clearProperty("SSA_UPLOAD_ROOT");
 
-        Path expected = Path.of(File.separatorChar == '\\' ? "C:\\upload" : "/var/lib/project-ssa/uploads");
+        Path expected = Path.of("C:\\upload");
         assertEquals(expected, RuntimeSettings.uploadRoot());
+    }
+
+    @Test
+    void providesLinuxUploadDefaultWithoutCreatingDirectories() {
+        assumeTrue(File.separatorChar == '/');
+        String environmentRoot = System.getenv("SSA_UPLOAD_ROOT");
+        assumeTrue(environmentRoot == null || environmentRoot.isBlank());
+        System.clearProperty("SSA_UPLOAD_ROOT");
+
+        assertEquals(Path.of("/var/lib/project-ssa/uploads"), RuntimeSettings.uploadRoot());
+    }
+
+    @Test
+    void keepsLinuxCacheSeparateAndAllowsAnExplicitOverride() {
+        assumeTrue(File.separatorChar == '/');
+        String environmentCache = System.getenv("SSA_CACHE_ROOT");
+        assumeTrue(environmentCache == null || environmentCache.isBlank());
+        System.clearProperty("SSA_CACHE_ROOT");
+        System.setProperty("SSA_UPLOAD_ROOT", temporaryDirectory.resolve("uploads").toString());
+        assertEquals(Path.of("/var/cache/project-ssa"), RuntimeSettings.cacheRoot());
+
+        System.setProperty("SSA_CACHE_ROOT", temporaryDirectory.resolve("cache").toString());
+        assertEquals(temporaryDirectory.resolve("cache"), RuntimeSettings.cacheRoot());
+        System.setProperty("SSA_CACHE_ROOT", "relative/cache");
+        assertThrows(IllegalStateException.class, RuntimeSettings::cacheRoot);
+    }
+
+    @Test
+    void explicitCacheRootDoesNotDependOnAnUnrelatedInvalidUploadSetting() {
+        System.setProperty("SSA_UPLOAD_ROOT", "invalid/relative/uploads");
+        System.setProperty("SSA_CACHE_ROOT", temporaryDirectory.toString());
+
+        assertEquals(temporaryDirectory, RuntimeSettings.cacheRoot());
     }
 
     @Test

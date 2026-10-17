@@ -1,10 +1,13 @@
-"""Non-secret runtime settings with defaults that preserve the prototype setup."""
+"""Non-secret settings: OS data directories and explicitly configured assets."""
 
 import os
-from pathlib import Path
+import re
+from pathlib import Path, PureWindowsPath
+
+from apps.environment import PROJECT_ROOT, REPOSITORY_ROOT, load_project_environment
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_project_environment()
 
 
 def _text(name, default):
@@ -33,9 +36,9 @@ def _bool(name, default=False):
     return value in {"1", "true", "yes", "on"}
 
 
-SPRING_HOST = _text("SSA_SPRING_HOST", "http://localhost:80/project_ssa_spring")
+SPRING_HOST = _text("SSA_SPRING_HOST", "http://localhost:8080/project_ssa_spring-0.0.1-SNAPSHOT/")
 ESP32_STREAM_URL = _text("SSA_ESP32_STREAM_URL", "http://192.168.0.100:80/stream")
-ESP32_COM_PORT = _text("SSA_ESP32_COM_PORT", "COM6")
+ESP32_COM_PORT = _text("SSA_ESP32_COM_PORT", "COM6" if os.name == "nt" else "")
 
 # Battery telemetry is produced by the existing ESP32 sensor polling command;
 # it never opens another serial connection.  The values below match the ESP32-S3
@@ -69,14 +72,11 @@ BUZZER_SHUTDOWN_SOUND_ENABLED = _bool("SSA_BUZZER_SHUTDOWN_SOUND_ENABLED", True)
 BUZZER_SHUTDOWN_SOUND_WAIT_SECONDS = _float(
     "SSA_BUZZER_SHUTDOWN_SOUND_WAIT_SECONDS", 5.0, minimum=0.1
 )
-YOLO_MODEL_PATH = _text(
-    "SSA_YOLO_MODEL_PATH",
-    str(PROJECT_ROOT / "runs" / "detect" / "my_yolov12_project" / "yolov8n_train-6" / "weights" / "best.pt"),
-)
+YOLO_MODEL_PATH = _text("SSA_YOLO_MODEL_PATH", "")
 VIDEO_PATHS = {
-    "video_1": _text("SSA_VIDEO_1_PATH", str(PROJECT_ROOT / "videos" / "streaming_0.mp4")),
-    "video_2": _text("SSA_VIDEO_2_PATH", str(PROJECT_ROOT / "videos" / "streaming_3.mp4")),
-    "video_3": _text("SSA_VIDEO_3_PATH", str(PROJECT_ROOT / "videos" / "streaming_2.mp4")),
+    "video_1": _text("SSA_VIDEO_1_PATH", ""),
+    "video_2": _text("SSA_VIDEO_2_PATH", ""),
+    "video_3": _text("SSA_VIDEO_3_PATH", ""),
 }
 
 # All detector workers are built from this one registry.  Adding a source only
@@ -90,7 +90,78 @@ DEFAULT_VIDEO_SOURCE_KEY = _text("SSA_DEFAULT_VIDEO_SOURCE", "video_1")
 if DEFAULT_VIDEO_SOURCE_KEY not in VIDEO_SOURCES:
     DEFAULT_VIDEO_SOURCE_KEY = "video_1"
 
-UPLOAD_ROOT = _text("SSA_UPLOAD_ROOT", "C:/upload")
+UPLOAD_ROOT = _text("SSA_UPLOAD_ROOT", "C:/upload" if os.name == "nt" else "/var/lib/project-ssa/uploads")
+
+
+class RuntimePathError(ValueError):
+    """A local path is unusable; messages identify settings without their values."""
+
+
+def filesystem_path(name, value, *, absolute=False):
+    """Resolve relative local paths against the repository, never process cwd."""
+    value = str(value or "").strip()
+    if not value:
+        raise RuntimePathError(f"{name} must be configured")
+    if "://" in value or (os.name != "nt" and PureWindowsPath(value).drive):
+        raise RuntimePathError(f"{name} must be a file-system path for this OS")
+    try:
+        path = Path(value).expanduser()
+        if absolute and not path.is_absolute():
+            raise RuntimePathError(f"{name} must be an absolute file-system path")
+        if not path.is_absolute():
+            path = REPOSITORY_ROOT / path
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        if isinstance(error, RuntimePathError):
+            raise
+        raise RuntimePathError(f"{name} is not a valid file-system path") from None
+
+
+def readable_file(name, value):
+    """Check before OpenCV/Ultralytics can interpret a missing file as a source."""
+    path = filesystem_path(name, value)
+    try:
+        if not path.is_file() or not os.access(path, os.R_OK):
+            raise RuntimePathError(f"{name} must reference an existing readable file")
+    except OSError:
+        raise RuntimePathError(f"{name} cannot be accessed") from None
+    return path
+
+
+def upload_directory(folder_name, *, create=False):
+    """Resolve the shared store; only actual snapshot writes create directories."""
+    if folder_name not in {"detection", "dangerlog"}:
+        raise RuntimePathError("Unsupported snapshot category")
+    root = filesystem_path("SSA_UPLOAD_ROOT", UPLOAD_ROOT, absolute=True)
+    directory = root / folder_name
+    try:
+        # The categories are fixed, but an existing symlink must not escape root.
+        directory.resolve().relative_to(root)
+        if create:
+            directory.mkdir(parents=True, exist_ok=True)
+            if not directory.is_dir() or not os.access(directory, os.W_OK | os.X_OK):
+                raise RuntimePathError("SSA_UPLOAD_ROOT must allow snapshot writes")
+    except (OSError, ValueError):
+        raise RuntimePathError("SSA_UPLOAD_ROOT cannot provide the snapshot directory") from None
+    return directory
+
+
+def validate_serial_port(value):
+    """Reject stale Windows COM names on Linux before invoking mpremote."""
+    value = str(value or "").strip()
+    if not value:
+        raise RuntimePathError("SSA_ESP32_COM_PORT must be configured")
+    if os.name == "nt":
+        return value
+    if re.fullmatch(r"COM\d+", value, re.IGNORECASE):
+        raise RuntimePathError("SSA_ESP32_COM_PORT must identify a serial device for this OS")
+    path = filesystem_path("SSA_ESP32_COM_PORT", value, absolute=True)
+    try:
+        if not path.is_char_device() or not os.access(path, os.R_OK | os.W_OK):
+            raise RuntimePathError("SSA_ESP32_COM_PORT must reference an accessible serial device")
+    except OSError:
+        raise RuntimePathError("SSA_ESP32_COM_PORT cannot be accessed") from None
+    return str(path)
 
 YOLO_CONFIDENCE = _float("SSA_YOLO_CONFIDENCE", 0.50, minimum=0.0)
 ANIMAL_UNDER_TARGET_SECONDS = _float("SSA_ANIMAL_UNDER_TARGET_SECONDS", 10.0, minimum=0.0)

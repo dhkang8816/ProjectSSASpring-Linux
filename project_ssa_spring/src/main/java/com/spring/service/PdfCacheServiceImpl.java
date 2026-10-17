@@ -8,6 +8,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 import com.spring.dao.PatrolReportDAO;
 import com.spring.dao.PdfCacheDAO;
@@ -26,20 +27,25 @@ public class PdfCacheServiceImpl implements PdfCacheService {
     private final PatrolReportDAO patrolReportDAO;
     private static final long TOKEN_TTL_MILLIS = 60_000L;
     private final PatrolReportPdfRenderer pdfRenderer;
-    private final Path cacheDirectory;
+    private final Supplier<Path> cacheDirectory;
     private final Map<String, Long> renderTokens = new ConcurrentHashMap<>();
 
     public PdfCacheServiceImpl(PdfCacheDAO pdfCacheDAO, PatrolReportDAO patrolReportDAO) {
         this(pdfCacheDAO, patrolReportDAO, new HeadlessChromePdfRenderer(),
-                Paths.get(RuntimeSettings.text("SSA_UPLOAD_ROOT", "C:\\upload"), "pdf-cache", "v4"));
+                () -> RuntimeSettings.cacheRoot().resolve("pdf-cache").resolve("v4"));
     }
 
     PdfCacheServiceImpl(PdfCacheDAO pdfCacheDAO, PatrolReportDAO patrolReportDAO,
             PatrolReportPdfRenderer pdfRenderer, Path cacheDirectory) {
+        this(pdfCacheDAO, patrolReportDAO, pdfRenderer, () -> cacheDirectory.toAbsolutePath().normalize());
+    }
+
+    private PdfCacheServiceImpl(PdfCacheDAO pdfCacheDAO, PatrolReportDAO patrolReportDAO,
+            PatrolReportPdfRenderer pdfRenderer, Supplier<Path> cacheDirectory) {
         this.pdfCacheDAO = pdfCacheDAO;
         this.patrolReportDAO = patrolReportDAO;
         this.pdfRenderer = pdfRenderer;
-        this.cacheDirectory = cacheDirectory.toAbsolutePath().normalize();
+        this.cacheDirectory = cacheDirectory;
     }
 
     @Override
@@ -47,6 +53,7 @@ public class PdfCacheServiceImpl implements PdfCacheService {
         if (reportId == null || reportId <= 0) {
             throw new InvalidRequestException("유효한 업무 보고서 번호가 필요합니다.");
         }
+        Path directory = cacheDirectory.get();
 
         PatrolReportVO report = patrolReportDAO.getReportById(reportId.intValue());
         if (report == null) {
@@ -54,7 +61,7 @@ public class PdfCacheServiceImpl implements PdfCacheService {
         }
 
         PdfCacheVO cached = pdfCacheDAO.selectLatestSuccessPdfCache(reportId);
-        Path cachedFile = resolveExistingCacheFile(cached);
+        Path cachedFile = resolveExistingCacheFile(cached, directory);
         if (cachedFile != null) {
             return cachedFile;
         }
@@ -67,7 +74,7 @@ public class PdfCacheServiceImpl implements PdfCacheService {
             throw new IllegalStateException("PDF 캐시 요청을 저장하지 못했습니다.");
         }
 
-        Path destination = cacheDirectory.resolve("patrol_report_" + reportId + "_" + request.getPdfCacheId() + ".pdf");
+        Path destination = directory.resolve("patrol_report_" + reportId + "_" + request.getPdfCacheId() + ".pdf");
         try {
             String token = createRenderToken(reportId);
             try {
@@ -118,13 +125,13 @@ public class PdfCacheServiceImpl implements PdfCacheService {
         return renderOrigin + "/patrolreport/internal/pdf/" + reportId + "?token=" + token;
     }
 
-    private Path resolveExistingCacheFile(PdfCacheVO cached) {
+    private Path resolveExistingCacheFile(PdfCacheVO cached, Path directory) {
         if (cached == null || cached.getPdfFilePath() == null || cached.getPdfFilePath().trim().isEmpty()) {
             return null;
         }
         try {
             Path file = Paths.get(cached.getPdfFilePath()).toAbsolutePath().normalize();
-            return file.startsWith(cacheDirectory) && Files.isRegularFile(file) ? file : null;
+            return file.startsWith(directory) && Files.isRegularFile(file) ? file : null;
         } catch (RuntimeException ex) {
             log.warn("Ignoring an invalid PDF cache path. pdfCacheId={}", cached.getPdfCacheId());
             return null;

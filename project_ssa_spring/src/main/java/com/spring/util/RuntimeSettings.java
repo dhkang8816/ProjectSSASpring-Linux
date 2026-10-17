@@ -21,15 +21,26 @@ public final class RuntimeSettings {
 
     public static Path uploadRoot() {
         String defaultPath = File.separatorChar == '\\' ? "C:\\upload" : "/var/lib/project-ssa/uploads";
-        String configuredPath = text("SSA_UPLOAD_ROOT", defaultPath);
+        return absolutePath("SSA_UPLOAD_ROOT", defaultPath);
+    }
+
+    public static Path cacheRoot() {
+        String configured = text("SSA_CACHE_ROOT", "");
+        String defaultPath = File.separatorChar == '\\' && configured.isBlank()
+                ? uploadRoot().toString() : "/var/cache/project-ssa";
+        return absolutePath("SSA_CACHE_ROOT", defaultPath);
+    }
+
+    private static Path absolutePath(String name, String defaultPath) {
+        String configuredPath = text(name, defaultPath);
         try {
             Path path = Path.of(configuredPath);
             if (!path.isAbsolute()) {
-                throw new IllegalStateException("SSA_UPLOAD_ROOT must be an absolute path: " + configuredPath);
+                throw new IllegalStateException(name + " must be an absolute path for the current operating system.");
             }
             return path.normalize();
         } catch (InvalidPathException ex) {
-            throw new IllegalStateException("SSA_UPLOAD_ROOT is not a valid path.", ex);
+            throw new IllegalStateException(name + " is not a valid path.");
         }
     }
 

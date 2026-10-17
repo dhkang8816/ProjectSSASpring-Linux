@@ -12,8 +12,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import jakarta.servlet.ServletContext;
+import lombok.extern.log4j.Log4j2;
 
 /** Shared storage paths for uploaded photos and externally produced snapshots. */
+@Log4j2
 public final class UploadStorage {
 
     private UploadStorage() {
@@ -98,13 +100,22 @@ public final class UploadStorage {
     }
 
     private static ResponseEntity<byte[]> readExternalImage(Path directory, String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return null;
+        }
         try {
             Path file = resolveFile(directory, fileName);
             if (Files.isRegularFile(file) && Files.isReadable(file)) {
                 return ResponseEntity.ok().contentType(mediaType(file.getFileName().toString())).body(Files.readAllBytes(file));
             }
-        } catch (IOException | IllegalArgumentException | SecurityException ignored) {
-            // Missing, inaccessible or unsafe external images use the bundled fallback.
+            if (!"noImage.jpg".equals(fileName)) {
+                log.warn("External image is unavailable; using the image fallback. "
+                        + "Check SSA_UPLOAD_ROOT permissions and the stored image reference.");
+            }
+        } catch (IOException | IllegalArgumentException | SecurityException ex) {
+            log.warn("External image cannot be read safely; using the image fallback. "
+                    + "Check SSA_UPLOAD_ROOT and the stored image reference. failure={}",
+                    ex.getClass().getSimpleName());
         }
         return null;
     }

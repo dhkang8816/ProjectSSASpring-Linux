@@ -1,15 +1,18 @@
 """Single-process production-style entry point for the Flask YOLO server.
 
-Use this instead of ``flask run --debug`` while OpenCV/FFmpeg, COM6, or
+Use this instead of ``flask run --debug`` while OpenCV/FFmpeg, serial devices, or
 background detection workers are active.  The reloader would create a second
 process and can duplicate native resources.
 """
 
 import os
 
-from dotenv import load_dotenv
 from werkzeug.serving import make_server
 
+from apps.environment import load_project_environment
+
+# Configuration modules must see .env before create_app or its imports run.
+load_project_environment()
 from apps.app import create_app
 
 
@@ -20,7 +23,6 @@ def _port():
         return 5000
 
 
-load_dotenv()
 app = create_app("local")
 
 

@@ -43,8 +43,8 @@ def index():
 def start_esp32_receiver():
     """Legacy lifecycle hook delegated to the source-worker manager."""
     global esp_mode_active
-    esp_mode_active = True
-    return yolo_detector.start_source_worker("esp32")
+    esp_mode_active = yolo_detector.start_source_worker("esp32")
+    return esp_mode_active
 
 
 def stop_esp32_receiver():
@@ -66,12 +66,13 @@ def change_mode_signal(mode_name):
     global has_resetted
     has_resetted = False
     if mode_name == "esp32":
-        yolo_detector.set_default_source("esp32")
-        start_esp32_receiver()
+        completed = yolo_detector.set_default_source("esp32") and start_esp32_receiver()
     else:
         # Preserve the old video-mode intent without stopping the other source
         # workers that now provide concurrent monitoring.
-        yolo_detector.set_default_source("video_1")
+        completed = yolo_detector.set_default_source("video_1")
+    if not completed:
+        return jsonify({"status": "FAIL", "mode": mode_name, "sources": yolo_detector.get_source_status()}), 503
     return jsonify({"status": "mode_changed", "mode": mode_name})
 
 

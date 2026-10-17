@@ -1,4 +1,3 @@
-import os
 import uuid
 from datetime import datetime
 import cv2
@@ -28,34 +27,31 @@ _report_queue = Queue(maxsize=100)
 
 # 🌟 [신규 개설] 실시간 프레임을 로컬 하드디스크에 직접 저장하는 고속 엔진 함수
 def _save_physical_snapshot(frame, folder_name):
-    """파이썬 메모리(OpenCV)에 상주하는 현재 프레임을 C드라이브 물리 폴더에 고유 파일명으로 저장합니다."""
+    """Persist a snapshot before its filename can be reported to Spring."""
     if frame is None:
         return "noImage.jpg"
-    
+
+    upload_path = runtime_settings.upload_directory(folder_name, create=True)
+    saved_name = f"{folder_name}_{uuid.uuid4()}.jpg"
+    full_file_path = upload_path / saved_name
     try:
-        # 1. 독립 물리 경로 디렉토리 경로 추출 (C:\upload\detection 또는 C:\upload\dangerlog)
-        upload_path = os.path.join(runtime_settings.UPLOAD_ROOT, folder_name)
-        if not os.path.exists(upload_path):
-            os.makedirs(upload_path) # 폴더 자동 생성(상위 폴더 포함)
-            
-        # 2. UUID 조합형 고유 파일명 생성하여 중복 크래시 차단
-        saved_name = f"{folder_name}_{uuid.uuid4()}.jpg"
-        full_file_path = os.path.join(upload_path, saved_name)
-        
-        # 3. OpenCV 물리 디스크 다이렉트 저장 가동 (네트워크 비용 0)
-        cv2.imwrite(full_file_path, frame)
-        print(f"📸 [자가캡처 완료] {full_file_path} 파일이 자동으로 저장 배포되었습니다.")
-        return saved_name
-    except Exception as e:
-        print(f"❌ [자가캡처 실패] 기본 이미지 복사 중 시스템 예외 발생: {e}")
-        return "noImage.jpg"
+        saved = cv2.imwrite(str(full_file_path), frame)
+    except Exception:
+        raise OSError("Snapshot write failed; check SSA_UPLOAD_ROOT and image encoding") from None
+    if not saved:
+        raise OSError("Snapshot write failed; check SSA_UPLOAD_ROOT and image encoding")
+    print("📸 [자가캡처 완료] 탐지 스냅샷을 저장했습니다.")
+    return saved_name
 
 def _local_snapshot_path(folder_name, saved_file_name):
     """Return a file-system path for Discord, never the Spring web URL."""
     if not saved_file_name or saved_file_name == "noImage.jpg":
         return None
-    candidate = os.path.join(runtime_settings.UPLOAD_ROOT, folder_name, saved_file_name)
-    return candidate if os.path.isfile(candidate) else None
+    directory = runtime_settings.upload_directory(folder_name)
+    candidate = directory / saved_file_name
+    if candidate.name != saved_file_name or not candidate.is_file():
+        raise OSError("Saved snapshot is unavailable; check SSA_UPLOAD_ROOT")
+    return str(candidate)
 
 
 def _enqueue_detection_discord_alert(notification, image_path, drone_id, source_key):

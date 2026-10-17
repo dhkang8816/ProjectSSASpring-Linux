@@ -9,6 +9,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
@@ -16,6 +17,9 @@ import java.nio.file.Path;
 import java.util.Date;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.spring.dao.PatrolReportDAO;
 import com.spring.dao.PdfCacheDAO;
@@ -23,6 +27,58 @@ import com.spring.dto.PatrolReportVO;
 import com.spring.dto.PdfCacheVO;
 
 class PdfCacheServiceImplTest {
+
+    @TempDir
+    Path temporaryDirectory;
+
+    private String originalCacheRoot;
+
+    @BeforeEach
+    void rememberCacheRoot() {
+        originalCacheRoot = System.getProperty("SSA_CACHE_ROOT");
+    }
+
+    @AfterEach
+    void restoreCacheRoot() {
+        if (originalCacheRoot == null) {
+            System.clearProperty("SSA_CACHE_ROOT");
+        } else {
+            System.setProperty("SSA_CACHE_ROOT", originalCacheRoot);
+        }
+    }
+
+    @Test
+    void defersCacheValidationUntilPdfRequestAndFailsBeforeDatabaseAccess() {
+        System.setProperty("SSA_CACHE_ROOT", "relative/uploads");
+        PdfCacheDAO cacheDAO = mock(PdfCacheDAO.class);
+        PatrolReportDAO reportDAO = mock(PatrolReportDAO.class);
+        PdfCacheService service = new PdfCacheServiceImpl(cacheDAO, reportDAO);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.getOrCreatePatrolReportPdf(7L, "http://127.0.0.1:80/app"));
+
+        assertTrue(error.getMessage().contains("SSA_CACHE_ROOT"));
+        verifyNoInteractions(cacheDAO, reportDAO);
+    }
+
+    @Test
+    void readsCacheUnderTheConfiguredCacheRootWithoutLaunchingBrowser() throws Exception {
+        System.setProperty("SSA_CACHE_ROOT", temporaryDirectory.toString());
+        Path directory = Files.createDirectories(temporaryDirectory.resolve("pdf-cache").resolve("v4"));
+        Path cachedFile = Files.writeString(directory.resolve("existing.pdf"), "%PDF-1.7");
+        PdfCacheDAO cacheDAO = mock(PdfCacheDAO.class);
+        PatrolReportDAO reportDAO = mock(PatrolReportDAO.class);
+        when(reportDAO.getReportById(7)).thenReturn(sampleReport());
+        when(cacheDAO.selectLatestSuccessPdfCache(7L)).thenReturn(PdfCacheVO.builder()
+                .pdfCacheId(10L).reportId(7L).generationStatus("SUCCESS")
+                .pdfFilePath(cachedFile.toString()).build());
+
+        Path result = new PdfCacheServiceImpl(cacheDAO, reportDAO)
+                .getOrCreatePatrolReportPdf(7L, "http://127.0.0.1:80/app");
+
+        assertEquals(cachedFile, result);
+        verify(cacheDAO, never()).insertPdfCacheRequest(any());
+    }
 
     @Test
     void returnsExistingSuccessCacheWhenTheCachedFileStillExists() throws Exception {
