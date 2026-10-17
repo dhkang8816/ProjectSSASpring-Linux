@@ -1,6 +1,8 @@
 # WSL2 · Tomcat 10 · Java 17 배포 메모
 
-## 후속 GPU 실행 제어 변경 (운영 미반영)
+최신 상태: 사용자 승인으로 권한 정상화·WAR 배포·Tomcat 재시작을 완료했다. 업로드·캐시 쓰기 및 실제 서비스 계정 CUDA/Oracle SELECT 검사를 통과했고 기본 Flask는 SQLite 없는 `ai` 모드다. [운영 권한 안내](../LINUX_RUNTIME_PERMISSIONS.md)에 실제 drop-in·백업·검증 범위가 있다. 아래 과거 미반영·SQLite 조치 기록과 구분한다.
+
+## 이전 GPU 실행 제어 변경 기록
 
 Flask 프로세스 응답(`processReady`)과 커스텀 YOLO CUDA 추론 준비(`aiReady`)를 구분한다.
 현재 `FlaskRuntimeControlService`는 토큰으로 보호된 Flask startup-status를 확인하며,
@@ -19,7 +21,7 @@ JSP 버튼도 AI 미준비/준비를 별도 표시한다. HTTP 200만으로 AI �
 아래 과거 배포 결과를 새 경로의 운영 검증 결과로 해석하지 않는다. PDF는 캐시 루트의
 `pdf-cache/v4`를 사용하며 경로 검증은 파일/PDF 요청 시 수행한다. `.env`나 JDBC 파일은 변경하지 않았다.
 
-외부 모델·영상·SQLite는 Flask 실행 환경에서 별도로 지정한다. Spring이 Flask를 시작하는
+외부 모델·영상은 Flask 실행 환경에서 별도로 지정한다. SQLite는 명시적 `local` 모드에서만 필요하다. Spring이 Flask를 시작하는
 선택 기능에는 `SSA_FLASK_PROJECT_DIR`, `SSA_FLASK_PYTHON_EXECUTABLE`의 유효한 절대경로가
 필요하다. PDF는 `SSA_PDF_BROWSER_PATH` 또는 실행 가능한 설치 브라우저가 필요하다.
 실제 파일 경로와 설치 여부를 확인하지 않은 채 예시를 운영값으로 사용하지 않는다.
@@ -170,6 +172,8 @@ sudo bash scripts/deploy-tomcat-java17.sh --apply
 
 
 ## Flask SQLite 서비스 경로 적용 기록
+
+아래는 AI 모드 분리 이전의 조치다. 현재 DB 파일은 보존하고 SQLite 쓰기 drop-in은 `.conf.disabled`로 비활성화했다. AI 서버는 이 DB에 의존하지 않는다.
 
 Flask가 `SSA_SQLITE_PATH must be configured`로 종료되고 이후 개발 계정 소유 DB의 읽기 권한 검사에서도 종료된 문제가 있었다. 사용자 승인으로 기존 `project_ssa_yolo/local.sqlite` 원본을 보존하고 `/var/lib/project-ssa/flask/local.sqlite`로 SQLite backup API 복사를 적용했다. 실제 `.env`에서 SQLite/모델 경로 두 키만 설정하는 예외와 이후 SQLite 전용 경로 갱신을 각각 승인받았다. 토큰·webhook·JDBC 값은 변경하지 않았다.
 

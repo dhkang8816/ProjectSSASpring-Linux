@@ -1,5 +1,7 @@
 # Linux 경로 설정 점검 및 운영 준비
 
+최신 운영 반영은 [Linux 실행 권한 안내](LINUX_RUNTIME_PERMISSIONS.md)를 따른다. 사용자 승인으로 업로드·캐시 권한과 systemd 예외를 적용했으며 기본 `ai` 모드는 SQLite 없이 실행된다. 아래의 초기 조사/미반영 결과는 당시 기록이다.
+
 후속으로 실제 프로젝트 `.venv`와 GPU 환경을 구축하고 기존 커스텀 모델의 CUDA 추론·Flask 생명주기를 검증했다. 최신 GPU 결과와 실제 운영에서 남은 제한은 [GPU 실행 환경 안내](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md)를 참고한다. 아래 경로 정리 당시의 격리 테스트 결과와 구분한다.
 
 후속 GPU 점검 시점에는 기존 업로드 디렉터리가 이미 존재했고 로컬 영상 설정도 Linux 경로로 바뀌어 있었다. 이는 이번 GPU 작업 전에 준비된 상태로 보존했다. 아래 초기 조사 당시의 ‘미생성/Windows 경로’ 기록을 현재 상태로 해석하지 않는다.
@@ -37,7 +39,7 @@
 | Flask 시작 명령 | `FlaskRuntimeControlService` → `ProcessBuilder` → `run_server.py` | `SSA_FLASK_PROJECT_DIR`, `SSA_FLASK_PYTHON_EXECUTABLE` 검증. 비어 있는 경로를 cwd로 해석하지 않음. 선택 기능이며 실제 프로세스 시작 검증은 미실행 |
 | 탐지 모델 | `runtime_settings.YOLO_MODEL_PATH` → `yolo_detector._run_inference()` → Ultralytics | `SSA_YOLO_MODEL_PATH`; 로드 전에 실제 읽을 수 있는 파일인지 확인. 없는 모델명에 대한 자동 다운로드를 방지 |
 | 영상 입력 | `VIDEO_PATHS` → `VIDEO_SOURCES` → `SourceWorker._open_capture()` | `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`; OpenCV 호출 전 파일 검증. 명시한 Windows 경로를 Linux에서 내부 기본 영상으로 대체하지 않음 |
-| Flask SQLite | `apps/config.py` → Flask-SQLAlchemy → `db_test/project_db.py` 및 인증·CRUD | `SSA_SQLITE_PATH` 필수; 실제 파일·접근 권한 검증. 미설정 시 빈 운영 DB를 자동 생성하지 않음. 테스트용 `SSA_TEST_SQLITE_PATH`는 운영 DB와 별도이며 미설정은 메모리 DB |
+| Flask SQLite (`local` 전용) | `apps/config.py` → Flask-SQLAlchemy → `db_test/project_db.py` 및 인증·CRUD | 기본 `ai` 모드에는 DB 엔진 없음. 명시적 `local`만 `SSA_SQLITE_PATH` 필수이며 파일·접근 권한 검증. 빈 운영 DB를 자동 생성하지 않음. `SSA_TEST_SQLITE_PATH` 미설정은 메모리 DB |
 | 임시 저장소 | Spring `web.xml` multipart, Java `Files.createTempDirectory()` | 컨테이너/JVM 임시 저장소 사용. 업로드 영구 저장소와 다름. Tomcat 서비스는 `PrivateTmp=yes`이므로 다른 프로세스와 `/tmp` 공유를 가정하지 않음 |
 | 로그 | Spring `log4j2.xml`의 `logs/app.log`; Python stdout | RollingFile 선언은 cwd 상대이지만 활성 logger는 Console만 참조. 이번 작업에서 파일 로그를 임의 활성화하지 않음 |
 | USB 시리얼 | `buzzer_helper.run_mpremote()` 및 `sensor_helper` | `SSA_ESP32_COM_PORT`. Windows COM 기본값은 Windows에서 유지. Linux에는 임의 USB 장치 기본값을 만들지 않으며 장치 경로·접근 권한을 실제 호출 전에 검증 |
@@ -77,7 +79,7 @@
 | 양쪽 프로세스의 공유 저장소 (선택 재정의) | `SSA_UPLOAD_ROOT` |
 | Spring PDF 캐시 (선택 재정의) | `SSA_CACHE_ROOT` |
 | 외부 모델·영상 | `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH` |
-| 외부 Flask DB | `SSA_SQLITE_PATH` |
+| 기존 Flask 화면의 DB (`local`만) | `SSA_SQLITE_PATH` |
 | 장비별 USB·영상 주소 | `SSA_ESP32_COM_PORT`, `SSA_ESP32_STREAM_URL` |
 | 배포 URL 일치 | `SSA_SPRING_HOST`, `SSA_FLASK_STREAM_URL`, `SSA_FLASK_ESP32_VIDEO_URL` |
 | PDF 브라우저 | `SSA_PDF_BROWSER_PATH` (미설정 시 설치된 브라우저 검색 가능) |
@@ -99,8 +101,11 @@ read -r -p '기존 모델 파일 경로: ' SSA_YOLO_MODEL_PATH
 read -r -p '기존 video_1 파일 경로: ' SSA_VIDEO_1_PATH
 read -r -p '기존 video_2 파일 경로: ' SSA_VIDEO_2_PATH
 read -r -p '기존 video_3 파일 경로: ' SSA_VIDEO_3_PATH
-read -r -p '기존 SQLite DB 파일 경로: ' SSA_SQLITE_PATH
-export SSA_YOLO_MODEL_PATH SSA_VIDEO_1_PATH SSA_VIDEO_2_PATH SSA_VIDEO_3_PATH SSA_SQLITE_PATH
+export SSA_YOLO_MODEL_PATH SSA_VIDEO_1_PATH SSA_VIDEO_2_PATH SSA_VIDEO_3_PATH
+# 기본 ai 모드는 SQLite 불필요. 기존 화면을 쓰는 local 모드에서만:
+# export SSA_FLASK_PROFILE=local
+# read -r -p '기존 SQLite DB 파일 경로: ' SSA_SQLITE_PATH
+# export SSA_SQLITE_PATH
 ```
 
 공유 저장소 경로만 일치시켜서는 충분하지 않다. Spring에는 Tomcat 실행 환경/JVM 속성으로, Flask에는 Flask 실행 환경으로 전달해야 한다. 실제 `.env`, `jdbc.properties`나 systemd 파일은 자동 편집하지 않는다. 기존 복사 파일을 사용하고 싶다면 위 변수에 명시적으로 지정하되 기존 내용·스키마를 먼저 확인한다.

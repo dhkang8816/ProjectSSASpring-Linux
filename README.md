@@ -2,16 +2,41 @@
 
 ![Java](https://img.shields.io/badge/Java-17-007396?logo=openjdk&logoColor=white)
 ![Spring MVC](https://img.shields.io/badge/Spring_MVC-6.2-6DB33F?logo=spring&logoColor=white)
-![Python](https://img.shields.io/badge/Python-Flask-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![Oracle](https://img.shields.io/badge/Oracle-XE-F80000?logo=oracle&logoColor=white)
-![YOLO](https://img.shields.io/badge/YOLO-Ultralytics-111F68)
+![YOLO](https://img.shields.io/badge/YOLOv8n-Custom-111F68)
 ![ESP32](https://img.shields.io/badge/ESP32-MicroPython-2C3E50)
 
 Spring MVC, Flask, YOLO, Oracle, ESP32를 연동해 실시간 영상 관제, AI 객체 탐지, 센서 모니터링, 경보 알림 및 운영 관리를 제공하는 유기동물 보호소 통합 관제 시스템입니다.
 
-> 이 문서는 현재 저장소의 Spring Mapper, JSP, Python 서비스, SQL 초기화 스크립트 및 설정 파일을 기준으로 작성되었습니다. 실제 키, DB 비밀번호, Webhook URL, 로컬 경로는 문서에 포함하지 않습니다.
+> 이 문서는 Ubuntu WSL2 기준 실행·배포와 현재 저장소의 코드를 설명합니다. 검증 기준일은 2026-10-17입니다. 실제 키, DB 비밀번호, 제어 토큰, Webhook URL은 포함하지 않습니다.
 
-### 프로젝트 목적
+## 현재 Linux 실행 환경과 검증 범위
+
+| 항목 | 확인한 환경 |
+| --- | --- |
+| OS | Ubuntu 26.04.1 LTS / WSL2 |
+| Java / Spring | Java 17, Spring MVC 6.2.19, Spring Security 6.2.8 |
+| WAS | Ubuntu 패키지 Tomcat 10.1.55, `tomcat10.service` |
+| DB | Windows 호스트의 Oracle 21c XE. 기본 Flask AI 모드는 SQLite 불필요 |
+| Python / Flask | 프로젝트 `.venv`의 Python 3.11.17 / Flask 3.1.3 |
+| GPU | NVIDIA GeForce RTX 3080 10 GB, Windows 호스트 드라이버 사용 |
+| PyTorch / torchvision | 2.7.1+cu126 / 0.22.1+cu126, CUDA runtime 12.6 |
+| YOLO / 영상 | Ultralytics 8.4.54, 기존 커스텀 YOLOv8n, OpenCV 4.13.0.92 |
+
+DRONE01~03의 영상·탐지 박스·클래스명 출력과 Spring 화면의 Flask 시작·종료·재시작/AI 준비를 확인했습니다. 실제 서비스 계정과 mount namespace에서 CUDA 추론, 세 입력 영상 접근, 업로드 임시 이미지 저장·재조회, Oracle 읽기 전용 SELECT도 통과했습니다.
+
+DRONE04 ESP32는 연결 대기 중입니다. Discord 실전송·Oracle 탐지 이벤트 INSERT·장시간 관제는 이번 검증에서 수행하지 않았습니다. PDF 캐시 권한은 확인했지만 실제 브라우저 렌더링은 미검증이며, 기존 회원·동물 사진 참조 각 1건의 원본 파일 복구도 남아 있습니다. 구현된 기능과 현재 환경에서 확인한 범위를 구분합니다.
+
+| 상세 문서 | 내용 |
+| --- | --- |
+| [운영 권한 및 SQLite 분리](LINUX_RUNTIME_PERMISSIONS.md) | ACL·systemd·실제 서비스 계정 검사·백업·남은 작업 |
+| [GPU 실행 환경](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md) | 검증 버전·커스텀 가중치·격리 GPU 검사 |
+| [WSL2 배포](project_ssa_spring/DEPLOYMENT_WSL2.md) | WAR·JDBC 리소스·Java 17 JSP 컴파일러 |
+| [전체 경로 설정](PATH_CONFIGURATION_LINUX.md) | 경로 인벤토리·환경변수·복사 파일 조사 |
+| [업로드 저장소](project_ssa_spring/UPLOAD_STORAGE.md) | 저장 폴더·이미지 조회·권한 정책 |
+
+## 프로젝트 목적과 구현 개요
 
 제한된 인력으로 여러 보호 구역을 동시에 살피기 어려운 문제를 해결하기 위해, 영상 탐지·센서·운영 데이터를 한 화면에 연결했습니다. 동물 개체수 미달과 위험 객체를 감지하고, 관제 이력·조치·보고서까지 이어지는 운영 흐름을 제공합니다.
 
@@ -163,12 +188,12 @@ flowchart TB
 | 영역 | 실제 사용 기술 |
 | --- | --- |
 | Frontend | JSP, JSTL, HTML, CSS, JavaScript, Chart.js |
-| Backend | Java 17, Spring MVC 6.2, Spring Security 6.2, MyBatis 3, Jackson |
+| Backend | Java 17, Spring MVC 6.2.19, Spring Security 6.2.8, MyBatis 3.5.19, Jackson |
 | Database | Oracle XE, JDBC, HikariCP, log4jdbc |
-| AI / Video | Python, Flask, Ultralytics YOLO, OpenCV, NumPy |
+| AI / Video | Python 3.11.17, Flask 3.1.3, PyTorch 2.7.1+cu126, torchvision 0.22.1+cu126, Ultralytics 8.4.54, OpenCV, NumPy |
 | IoT | ESP32-S3, ESP32-CAM, MicroPython, `mpremote` |
 | External API | Kakao Local, Open-Meteo, NOAA SWPC, Discord Webhook |
-| Server | Apache Tomcat 10.1, Flask built-in server (`run_server.py`) |
+| Server | Apache Tomcat 10.1.55 / systemd, Werkzeug threaded server (`run_server.py`) |
 | Build / Test | Maven, JUnit 5, Mockito, pytest |
 | Development | Eclipse, VS Code, SQL Developer, Thonny, Git |
 
@@ -230,28 +255,67 @@ SEQ_PDF_CACHE
 
 > 개발 및 시연 환경의 초기 로그인 검증을 위한 seed 계정입니다. 실제 비밀번호는 README에 기록하지 않습니다. 공유·운영 환경에서는 반드시 별도 관리자 계정을 생성하고 seed 계정을 제거하거나 자격 증명을 변경하세요.
 
-## 환경 설정
+## Linux / WSL2 환경 설정
 
-### Linux / WSL2 경로 설정
+현재 기준은 Ubuntu WSL2와 Ubuntu 패키지 `tomcat10.service`입니다. 아래 명령은 별도 표시가 없으면 **저장소 루트**에서 실행합니다.
 
-최신 운영 권한·systemd 적용 및 SQLite 분리 결과는 [Linux 실행 권한 안내](LINUX_RUNTIME_PERMISSIONS.md)를 참고합니다. 운영 기본값은 SQLite 없는 `SSA_FLASK_PROFILE=ai`이며 기존 Flask 로그인·CRUD 화면은 명시적 `local` 모드로 보존합니다.
+```bash
+cd ~/workspace/ProjectSSASpring-Linux-git
+java -version
+mvn -version
+python3.11 --version
+nvidia-smi
+```
 
-검증된 Python 3.11 / PyTorch CUDA 12.6 / 커스텀 YOLOv8n 설치와 GPU·Flask 생명주기 검사 결과는 [GPU 실행 환경 안내](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md)를 참고합니다. 실제 운영 Tomcat·ESP32 관제 검증과 개발 계정의 격리 GPU 검사는 구분합니다.
+명령이 없거나 버전이 다르면 먼저 설치 상태를 확인합니다. 시스템 Python을 교체하거나 WSL 내부에 NVIDIA Linux GPU 드라이버를 설치하지 않습니다. 검증된 PyTorch wheel에는 CUDA runtime이 포함되어 있어 현재 추론에는 별도 CUDA Toolkit이 필요하지 않았습니다.
 
-전체 사용처·복사 파일의 출처·남은 운영 작업은 [경로 점검 문서](PATH_CONFIGURATION_LINUX.md)를 참고합니다.
-업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`입니다. 설정 로딩은 디렉터리를 생성하지 않습니다. 현재 WSL 운영 환경에는 사용자 승인으로 전용 디렉터리·ACL·systemd 쓰기 예외를 적용했습니다.
+### 설정 파일과 적용 우선순위
 
-- Spring과 Flask의 공유 업로드는 `SSA_UPLOAD_ROOT`, Spring PDF 캐시는 `SSA_CACHE_ROOT`로 재정의합니다. 경로는 절대경로여야 하며 없는 디렉터리를 설정 로딩이나 점검만으로 생성하지 않습니다. Windows는 기존 업로드 기본값과 업로드 루트 아래 PDF 캐시 기본 위치를 유지합니다.
-- 외부 모델·영상은 `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`로 명시해야 합니다. `SSA_SQLITE_PATH`는 기존 Flask 화면을 쓰는 `local` 모드에서만 필요합니다. 미설정 파일 경로를 추측하거나 빈 운영 DB를 생성하지 않습니다. Python 상대 파일 경로는 **저장소 루트** 기준이며 `project_ssa_yolo/` 기준이 아닙니다.
-- Flask는 프로젝트 루트 `.env`를 설정 import 전에 읽습니다. 프로세스 환경변수가 `.env`보다 우선하므로 Windows에서 복사한 로컬 설정을 Linux 실행 환경에서 덮어쓸 수 있습니다. Spring은 `.env`를 읽지 않으며 JVM 속성이 환경변수보다 우선합니다.
-- `SSA_ESP32_COM_PORT`는 해당 OS의 실제 장치로 지정합니다. Linux에서 Windows COM 이름이나 임의 USB 기본값을 사용하지 않습니다. HTTP 스트림은 별도 `SSA_ESP32_STREAM_URL`입니다.
-- systemd로 실행하는 Tomcat에는 일반 셸의 환경변수가 자동 전달되지 않습니다. 외부 저장소는 공유 권한과 Tomcat `ProtectSystem`/`ReadWritePaths` 제한을 함께 검토해야 합니다. 운영 설정 변경·재시작은 별도 작업입니다.
+| 대상 | 설정 위치 | 적용 방식 |
+| --- | --- | --- |
+| Oracle JDBC | `project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties` | 같은 디렉터리의 `.example` 참고. 기존 파일은 보존 |
+| Flask | `project_ssa_yolo/.env` | 프로세스 환경변수 → `.env` → 코드 기본값 |
+| Tomcat 서비스 | `/etc/project-ssa/tomcat.env` 및 systemd drop-in | 일반 셸의 `export`는 이미 실행 중인 서비스에 전달되지 않음 |
+| Spring 공통 설정 | JVM `-D` 속성 / Tomcat 환경변수 | 비어 있지 않은 JVM 속성이 환경변수보다 우선. Flask `.env`는 읽지 않음 |
 
-### Spring / Tomcat
+로컬 설정이 없는 새 개발 환경에서만 예시를 복사합니다. 다음 명령은 기존 파일을 덮어쓰지 않고 새 비밀 파일의 기타 사용자 접근을 제한합니다. Tomcat에서 Flask를 시작하려면 이후 서비스 계정의 읽기 권한을 별도로 점검해야 합니다.
 
-1. `project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties.example`을 참고해 같은 경로에 로컬 `jdbc.properties`를 만듭니다.
-2. `YOUR_USERNAME`, `YOUR_PASSWORD`를 개인 Oracle 계정 값으로 바꿉니다.
-3. Eclipse에서는 **Servers → Tomcat → Open Launch Configuration → Environment**에서 환경변수를 추가합니다.
+```bash
+if [ ! -e project_ssa_yolo/.env ]; then
+  (
+    umask 077
+    cp project_ssa_yolo/.env.example project_ssa_yolo/.env
+  )
+fi
+if [ ! -e project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties ]; then
+  (
+    umask 077
+    cp project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties.example \
+       project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties
+  )
+fi
+```
+
+실제 비밀번호·토큰·Webhook 값은 문서나 Git에 기록하지 않습니다. JDBC는 현재 Windows 호스트의 Oracle 21c XE를 사용합니다. WSL에서 접근 가능한 실제 호스트 주소와 서비스명을 사용하고, 기존에 해결된 포트 프록시·방화벽·Oracle 설정은 임의 변경하지 않습니다. 기존 DB가 있다면 초기화 SQL을 다시 실행하지 않습니다.
+
+### 파일 저장소와 외부 자산
+
+| 용도 | Linux 설정 | 기준 및 현재 상태 |
+| --- | --- | --- |
+| 업로드·탐지 스냅샷 | `SSA_UPLOAD_ROOT` | 기본/현재 `/var/lib/project-ssa/uploads`, Spring·Flask 공통 |
+| 사진·스냅샷 하위 폴더 | 업로드 루트 아래 `member`, `animals`, `detection`, `dangerlog` | 용도별 기존 이름 유지 |
+| PDF 캐시 | `SSA_CACHE_ROOT` | 기본/현재 `/var/cache/project-ssa`, 실제 PDF는 `pdf-cache/v4` 아래 |
+| Ultralytics 설정 | `YOLO_CONFIG_DIR` | 현재 서비스는 `/var/cache/project-ssa/ai` 지정, 라이브러리가 그 아래 `Ultralytics` 사용 |
+| 커스텀 모델 | `SSA_YOLO_MODEL_PATH` | 기존 가중치 파일 지정 필수. 임의 모델 다운로드·대체 없음 |
+| 입력 영상 3개 | `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH` | 각 채널의 기존 파일 지정 필수 |
+| 기존 Flask 화면 DB | `SSA_SQLITE_PATH` | `SSA_FLASK_PROFILE=local`에서만 필요. 기본 `ai`에는 불필요 |
+| PDF 브라우저 | `SSA_PDF_BROWSER_PATH` | 기존 실행 파일을 지정하거나 설치된 지원 브라우저 검색. 현재 실제 렌더링 미검증 |
+
+Python의 모델·영상·SQLite **상대경로는 저장소 루트** 기준입니다. 업로드/캐시 루트와 Spring이 실행할 Python·Flask 프로젝트 경로는 절대경로를 사용합니다. Linux에서는 대소문자를 구분하며 Windows 드라이브 경로를 사용할 수 없습니다. 설정 로딩과 기본 진단은 운영 디렉터리나 빈 DB를 자동 생성하지 않습니다.
+
+모델·영상은 `.gitignore` 대상이므로 clone만으로 준비되지 않습니다. 실제 파일을 확인한 후 위 변수를 설정합니다. 현재 유지하는 모델은 `yolov8n_train-6/weights/best.pt`이며, 상위 폴더에 `my_yolov12_project`라는 이름이 있어도 실제 구조는 **커스텀 YOLOv8n**입니다. 파일·클래스·해시는 [GPU 환경 문서](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md#유지한-커스텀-모델)에 있습니다.
+
+### Spring / Tomcat 환경변수
 
 | 변수 | 용도 |
 | --- | --- |
@@ -269,18 +333,11 @@ SEQ_PDF_CACHE
 | `SSA_DISCORD_INVITE_URL` | 공통 사이드바의 Discord 초대 링크. `RuntimeSettings`를 거쳐 모든 `menu.jsp`에 주입됩니다. |
 | `SSA_ENABLE_LEGACY_LABEL_EVENT_SIDE_EFFECTS` | legacy label event 부수효과 사용 여부 |
 
-Spring의 `RuntimeSettings`는 JVM system property를 먼저 확인하고, 없으면 Tomcat 환경변수를 확인합니다. 따라서 Discord 초대 링크는 Eclipse의 **Servers → Tomcat → Open Launch Configuration → Environment**에 `SSA_DISCORD_INVITE_URL`로 설정합니다. URL은 `https` 기반의 Discord 초대 링크를 사용하며, 값 변경 후에는 Tomcat을 재시작합니다.
+Ubuntu 서비스 설정은 `/etc/project-ssa/tomcat.env`와 관련 drop-in에서 관리합니다. 이 파일은 root가 관리하며 `0600`을 유지합니다. systemd가 환경 파일을 읽어 전달하므로 Tomcat에 파일 전체 읽기 권한을 줄 필요는 없습니다. 설정을 바꾼 뒤 서비스 재시작이 필요합니다.
 
-`SSA_DISCORD_INVITE_URL`은 Spring 화면의 **사이드바 링크** 설정이고, Flask `.env`의 `DISCORD_WEBHOOK_URL`은 탐지 경보를 전송하는 **Webhook** 설정입니다. 두 값은 목적과 설정 위치가 다르므로 서로 대체하지 않습니다.
+`SSA_DISCORD_INVITE_URL`은 JSP 사이드바의 초대 링크이고, Flask의 `DISCORD_WEBHOOK_URL`은 알림 전송 설정입니다. 두 값의 목적과 설정 위치를 구분합니다.
 
-### Flask / YOLO
-
-`project_ssa_yolo/.env.example`을 복사해 로컬 `.env`를 만든 뒤 실제 환경에 맞게 수정합니다.
-
-```powershell
-Set-Location project_ssa_yolo
-Copy-Item .env.example .env
-```
+### Flask / YOLO 환경변수
 
 | 변수 그룹 | 주요 변수 |
 | --- | --- |
@@ -296,157 +353,148 @@ Copy-Item .env.example .env
 | Worker / HTTP | `SSA_METADATA_REQUEST_TIMEOUT_SECONDS`, `SSA_EVENT_REQUEST_TIMEOUT_SECONDS`, `SSA_MAPPING_REQUEST_TIMEOUT_SECONDS`, `SSA_SOURCE_WORKER_STOP_TIMEOUT_SECONDS`, `SSA_SOURCE_WORKER_FRAME_INTERVAL_SECONDS`, `SSA_SOURCE_WORKER_RETRY_SECONDS`, `SSA_AUTO_START_DETECTION_WORKERS` |
 | 기타 | `SSA_UPLOAD_ROOT`, `SSA_BUZZER_STARTUP_SOUND_ENABLED`, `SSA_BUZZER_SHUTDOWN_SOUND_ENABLED`, `SSA_BUZZER_SHUTDOWN_SOUND_WAIT_SECONDS`, `DISCORD_WEBHOOK_URL` |
 
-`.env.example`에는 안전한 예시값만 유지하고, 실제 `.env`와 Discord Webhook은 Git에 올리지 않습니다.
+- 기본 실행 모드는 `SSA_FLASK_PROFILE=ai`입니다. SQLite 엔진이나 기존 로그인·CRUD 화면을 초기화하지 않고 영상·YOLO·Spring callback을 제공합니다. 운영 DB는 Oracle입니다.
+- 기존 Flask 자체 로그인·CRUD·기록 화면은 `SSA_FLASK_PROFILE=local`과 기존 `SSA_SQLITE_PATH`로 보존합니다. `apps/db_test/project_db.py`는 이 화면들의 실제 모델이며 테스트 전용 코드가 아닙니다.
+- `SSA_YOLO_DEVICE` 기본값은 `cuda:0`입니다. GPU 요청이 실패하면 오류를 보고하며 조용히 CPU로 전환하지 않습니다. CPU 사용은 `cpu`를 명시한 경우만 허용합니다.
+- `SSA_OPTIONAL_IO_ENABLED=false`는 USB 센서·부저와 Discord worker를 생략합니다. **Spring 이벤트 callback까지 차단하는 설정은 아닙니다.**
+- `SSA_AUTO_START_DETECTION_WORKERS` 기본값은 `false`입니다. 실제 로컬 설정에서 재정의했는지도 확인합니다. 프로세스·모델 준비와 영상 채널 가동은 별개입니다.
+- `.env.example`에 남아 있는 `COM6` 및 ESP32 사설 주소는 예시입니다. Linux에서는 `SSA_ESP32_COM_PORT`에 실제 연결 장치 경로를, `SSA_ESP32_STREAM_URL`에 실제 MJPEG 주소를 지정합니다. DRONE04 장비 연결은 별도 작업입니다.
 
-#### 채널별 로컬 영상 설정
+### 서비스 계정과 권한
 
-`project_ssa_yolo/videos/`와 영상 파일은 저장소에 포함하지 않습니다. 영상은 용량이 크고 시연·보호소 환경에 따라 내용이 달라지므로 `.gitignore`의 `**/videos/` 규칙으로 제외됩니다. 따라서 신규 개발 환경에서는 아래처럼 로컬 `.env`에 각 채널의 실제 파일 경로를 지정해야 합니다.
+현재 Tomcat은 `tomcat:tomcat`, 보조 그룹은 `ssa-upload`, `UMask=0007`로 실행합니다. 업로드·캐시 디렉터리는 setgid와 기본 ACL을 사용하고 새 업로드 파일은 `ssa-upload` 그룹·0660을 유지합니다. `ProtectSystem=strict`, `PrivateTmp=yes`, `NoNewPrivileges=yes`를 유지하면서 두 데이터 루트에만 쓰기 예외를 추가했습니다.
 
-```dotenv
-SSA_VIDEO_1_PATH=C:/ssa-assets/videos/area-a.mp4
-SSA_VIDEO_2_PATH=C:/ssa-assets/videos/area-b.mp4
-SSA_VIDEO_3_PATH=C:/ssa-assets/videos/area-c.mp4
-SSA_ESP32_STREAM_URL=http://192.168.0.100:80/stream
-SSA_DEFAULT_VIDEO_SOURCE=video_1
-```
+프로젝트/홈 전체에 재귀 chmod·chown을 적용하지 않습니다. 소스·모델·영상·가상환경·실제 Python 인터프리터까지 부모 디렉터리 검색 권한을 점검해야 합니다. 기존 `.venv`는 기본 인터프리터를 참조하므로 폴더 복사만으로 이전이 끝나지 않습니다.
 
-| 관제 채널 | 소스 종류 | 설정값 | 기본 경로 또는 주소 |
-| --- | --- | --- | --- |
-| `video_1` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_1_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
-| `video_2` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_2_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
-| `video_3` | 로컬 MP4 등 OpenCV 입력 | `SSA_VIDEO_3_PATH` | 기본 파일 없음, 기존 파일 지정 필수 |
-| `esp32` | ESP32-CAM MJPEG 스트림 | `SSA_ESP32_STREAM_URL` | `http://192.168.0.100:80/stream` |
+권한 적용 내역과 기본 읽기 전용 검사 도구는 [Linux 실행 권한 안내](LINUX_RUNTIME_PERMISSIONS.md)에 있습니다. 실제 운영 경로나 권한을 새로 만들기 전에 해당 문서의 적용 범위를 확인합니다.
 
-- `video_1~3`은 각자 독립적인 `SourceWorker`가 처리하며, 하나의 파일 경로를 여러 채널에 설정할 수도 있습니다.
-- `esp32`는 로컬 동영상 파일이 아니라 HTTP MJPEG 주소를 사용합니다.
-- 파일 또는 스트림 주소를 변경한 뒤 Flask 서버를 재시작합니다. 파일이 없거나 OpenCV가 열 수 없는 형식이면 해당 채널만 `탐지 중지` 상태가 됩니다.
-- 실제 영상 파일, ESP32의 사설 IP, 로컬 `.env`는 커밋하지 않습니다.
+## Linux 실행 및 배포
 
-## 실행 방법
+### 1. Python 가상환경과 검증된 의존성
 
-### 1. Oracle XE
-
-위의 [Oracle 초기화 순서](#oracle-초기화-순서)를 따라 빈 개발 스키마를 초기화하고 `jdbc.properties`를 준비합니다.
-
-### 2. Flask / YOLO 서버
-
-`requirements.txt`는 Flask, YOLO/OpenCV, ESP32 제어에 필요한 실행 의존성을 관리합니다. `requirements-test.txt`는 실행 의존성에 pytest를 추가합니다.
-
-```powershell
-Set-Location project_ssa_yolo
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python run_server.py
-```
-
-Linux에서는 실제 경로·주소 환경변수와 실행 의존성을 준비한 뒤 다음 절차를 사용합니다. 아래 가상환경 생성·패키지 설치·서버 시작은 운영자가 실행할 안내이며 이번 경로 점검에서 실행하지 않았습니다.
+현재 `.venv`가 있으면 다시 만들거나 덮어쓰지 말고 먼저 버전을 확인합니다.
 
 ```bash
-cd project_ssa_yolo
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu126
-python -m pip install -r requirements-linux-cu126.lock.txt
-python -m pip check
-python run_server.py
+project_ssa_yolo/.venv/bin/python --version
+project_ssa_yolo/.venv/bin/python -m pip check
 ```
 
-Python 실행 파일과 설치된 패키지/GPU 구성은 환경별로 확인해야 합니다. `.env`, `jdbc.properties`가 이미 있다면 예시 파일로 덮어쓰지 않습니다.
+다음은 **새 환경에 동일 조합을 구성할 때** 사용하는 설치 명령입니다. Python 3.11과 venv 지원이 먼저 준비되어 있어야 합니다. 시스템 패키지·드라이버 설치는 포함하지 않습니다.
 
-`run_server.py`는 `.env`를 읽고 `SSA_FLASK_PROFILE`에 따라 앱을 생성하며 기본값은 `ai`입니다. AI 모드는 SQLite 엔진과 기존 DB 화면을 초기화하지 않고 영상·YOLO·Spring 연동을 제공합니다. 기존 Flask 로그인·CRUD 화면은 `SSA_FLASK_PROFILE=local`과 기존 `SSA_SQLITE_PATH`를 명시해 실행합니다. OpenCV/FFmpeg/serial worker 중복을 막기 위해 reloader 없이 단일 threaded Werkzeug 서버로 실행됩니다. YOLO 모델·영상은 실제 파일로 지정해야 합니다. CUDA 요청 실패 시 CPU로 자동 전환하지 않으며 Spring 시작 제어는 HTTP 응답과 실제 모델 추론 준비를 구분합니다.
-
-상태·Discord 미발송 진단과 수정 근거는 [GPU 환경 문서의 영상 연동 후 진단](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md#영상-연동-후-상태알림-진단-및-수정-2026-10-17)을 참고합니다. health는 실제 AI 준비와 worker/콜백 결과를 읽기 전용으로 제공하며 제어 토큰 없이도 AI 준비를 조회합니다. 시작·종료 권한은 계속 제어 토큰과 관리자 권한으로 제한합니다.
-
-#### 메뉴 Flask ON/OFF 제어 (로컬 개발 환경 전용)
-
-관리자 계정에는 좌측 사이드바 하단에 Flask 상태 버튼이 표시됩니다. 기본적으로는 시작·종료 제어가 비활성화되어 있으며, **로컬 개발 환경에서만** 아래 Tomcat 환경변수와 Flask `.env` 설정을 모두 완료하면 활성화됩니다. Spring은 `localhost`, `127.0.0.1`, `::1` Flask만 제어할 수 있도록 제한합니다.
-
-Eclipse에서는 **Servers → Tomcat → Open Launch Configuration → Environment**에서 아래 값을 추가한 뒤 Tomcat을 재시작합니다.
-
-```text
-# Tomcat Environment
-SSA_FLASK_CONTROL_ENABLED=true
-SSA_FLASK_STREAM_URL=http://localhost:5000/stream
-SSA_FLASK_PROJECT_DIR=<project_ssa_yolo의_OS별_절대경로>
-SSA_FLASK_PYTHON_EXECUTABLE=<가상환경_Python의_OS별_절대경로>
-SSA_FLASK_CONTROL_TOKEN=24자_이상의_별도_랜덤_토큰
-
-# project_ssa_yolo/.env
-SSA_FLASK_CONTROL_TOKEN=24자_이상의_별도_랜덤_토큰
+```bash
+python3.11 -m venv project_ssa_yolo/.venv
+project_ssa_yolo/.venv/bin/python -m pip install \
+  torch==2.7.1 torchvision==0.22.1 \
+  --index-url https://download.pytorch.org/whl/cu126
+project_ssa_yolo/.venv/bin/python -m pip install \
+  -r project_ssa_yolo/requirements-linux-cu126.lock.txt
+project_ssa_yolo/.venv/bin/python -m pip check
 ```
 
-| 설정값 | 필수 여부 | 설명 |
-| --- | --- | --- |
-| `SSA_FLASK_CONTROL_ENABLED=true` | 필수 | 메뉴의 시작·종료 제어를 활성화합니다. 미설정 시 상태만 확인하고 제어할 수 없습니다. |
-| `SSA_FLASK_STREAM_URL` | 권장 | Flask stream base URL입니다. 제어 기능은 `http://localhost:5000/stream`처럼 로컬 주소여야 합니다. |
-| `SSA_FLASK_PROJECT_DIR` | 시작 시 필수 | `run_server.py`가 있는 `project_ssa_yolo`의 절대 경로입니다. |
-| `SSA_FLASK_PYTHON_EXECUTABLE` | 시작 시 필수 | Flask 의존성이 설치된 Python 실행 파일의 절대 경로입니다. |
-| `SSA_FLASK_CONTROL_TOKEN` | 필수 | 24자 이상 랜덤 토큰입니다. Tomcat 환경변수와 Flask `.env`에 **완전히 동일한 값**을 설정합니다. |
+`constraints-linux-cu126.txt`는 핵심 버전 제약, `requirements-linux-cu126.lock.txt`는 검증한 전체 설치 스냅샷입니다. `requirements.txt`는 기존 화면을 포함한 전체 실행 의존성, `requirements-ai.txt`는 DB 화면 의존성을 뺀 선택적 AI 목록입니다. 현재 설치 패키지는 삭제하지 않았습니다. vendor `yolov12/requirements.txt`의 별도 학습 환경을 운영 YOLOv8n 환경에 섞어 설치하지 않습니다.
 
-토큰은 PowerShell 터미널에서 생성할 수 있습니다. Python 대화형 프롬프트(`>>>`) 안이 아니라 일반 PowerShell에서 실행합니다.
+### 2. Spring WAR 빌드
 
-```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
+신규 Maven 환경에서 `html.filter:XSS.filter:1.0` 의존성을 찾지 못할 때만 저장소의 `html-filter-1.0.jar.zip`을 로컬 저장소에 등록합니다. 이 파일은 JAR 형식 아카이브입니다.
 
-Flask `.env`에는 위 토큰 외에도 배포마다 별도의 고정 secret을 설정합니다. 실제 `.env`는 커밋하지 않습니다.
-
-```dotenv
-SSA_FLASK_SECRET_KEY=배포별_랜덤_시크릿
-SSA_FLASK_CSRF_SECRET_KEY=배포별_별도_랜덤_시크릿
-SSA_FLASK_CONTROL_TOKEN=Tomcat과_동일한_24자_이상_토큰
-```
-
-Spring은 설정된 로컬 `run_server.py`만 시작합니다. 종료는 토큰이 일치할 때 Flask의 정상 종료 API를 호출하므로 Flask도 반드시 `python run_server.py`로 실행해야 합니다. `flask run` 등 다른 실행 방식은 상태 확인은 가능해도 정상 종료 API가 준비되지 않아 종료 요청이 `503`으로 실패할 수 있습니다. 원격 Flask 주소와 임의 Python 프로세스 강제 종료는 지원하지 않습니다.
-
-환경변수를 바꾼 뒤에는 **Tomcat 재시작**, `.env`를 바꾼 뒤에는 **Flask 재시작**이 필요합니다. `RuntimeSettings`는 JVM system property를 먼저 읽고, 없을 때 Tomcat 환경변수를 읽습니다.
-
-### 3. 로컬 Maven 의존성: XSS.filter
-
-프로젝트는 `pom.xml`에서 `html.filter:XSS.filter:1.0` 라이브러리를 참조합니다. 저장소에 포함된 `html-filter-1.0.jar.zip`은 JAR 형식의 아카이브이므로, 최초 1회 로컬 Maven 저장소에 설치해야 Maven과 Eclipse가 의존성을 해석할 수 있습니다.
-
-`ProjectSSASpring` 저장소 루트에서 다음 명령을 실행합니다.
-
-```powershell
-mvn install:install-file `
-  -Dfile=.\html-filter-1.0.jar.zip `
-  -DgroupId=html.filter `
-  -DartifactId=XSS.filter `
-  -Dversion=1.0 `
-  -Dpackaging=jar `
+```bash
+mvn install:install-file \
+  -Dfile=html-filter-1.0.jar.zip \
+  -DgroupId=html.filter \
+  -DartifactId=XSS.filter \
+  -Dversion=1.0 \
+  -Dpackaging=jar \
   -DgeneratePom=true
 ```
 
-설치 후 아래 명령이 `True`를 반환하면 정상입니다.
+JDBC 로컬 설정을 준비한 뒤 Java 17로 빌드합니다.
 
-```powershell
-Test-Path "$env:USERPROFILE\.m2\repository\html\filter\XSS.filter\1.0\XSS.filter-1.0.jar"
+```bash
+mvn -f project_ssa_spring/pom.xml clean verify
 ```
 
-Eclipse를 사용하는 경우 설치 후 프로젝트를 우클릭하여 **Maven > Update Project...**를 실행하거나 프로젝트를 다시 import합니다.
+산출물은 `project_ssa_spring/target/project_ssa_spring-0.0.1-SNAPSHOT.war`입니다. 빌드는 JDBC 파일 존재를 검사하며 WAR의 `WEB-INF/classes/com/spring/properties/jdbc.properties`에 포함합니다. 해당 WAR에도 자격 증명이 포함되므로 공개 첨부하지 않습니다. 단위 테스트는 실제 Oracle에 연결하지 않습니다.
 
-### 4. Spring MVC 서버
+### 3. Tomcat 배포와 Java 17 JSP 컴파일러
 
-1. Eclipse에서 `project_ssa_spring`을 Existing Maven Project로 import합니다.
-2. Java 17과 Apache Tomcat 10.1 서버를 설정합니다.
-3. `jdbc.properties`와 필요한 Tomcat 환경변수를 설정합니다.
-4. 프로젝트를 Tomcat에 배포하고 서버를 시작합니다.
+현재 배포는 `/var/lib/tomcat10/webapps/project_ssa_spring-0.0.1-SNAPSHOT`이며 서비스 이름은 `tomcat10.service`입니다. 접속 주소는 다음과 같습니다.
 
-Maven CLI를 사용할 수 있는 환경에서는 다음 명령으로 테스트를 실행할 수 있습니다.
-
-```powershell
-Set-Location project_ssa_spring
-mvn test
+```text
+http://localhost:8080/project_ssa_spring-0.0.1-SNAPSHOT/
 ```
 
-### 5. ESP32 연결 시 주의사항
+이 환경에서는 Ubuntu의 JSP 컴파일러 JAR가 Java 17에서 로드되지 않아 HTTP 500이 발생했습니다. 검증된 upstream ECJ 3.35.0을 Tomcat 인스턴스의 `lib`에 추가하는 조치를 사용합니다. `mvn clean`은 staging된 ECJ도 지우므로, 배포 검사 전에 다시 준비합니다.
 
-- 직렬 장치는 장비마다 다르므로 `SSA_ESP32_COM_PORT`로 지정합니다. Windows의 COM 기본값은 Windows 전용이며 Linux에서는 연결된 실제 장치의 절대경로와 접근 권한이 필요합니다.
-- Thonny 등 다른 도구가 동일한 serial port를 점유하면 `mpremote`와 충돌할 수 있습니다.
-- ESP32-CAM IP가 바뀌면 로컬 `.env`의 `SSA_ESP32_STREAM_URL`만 변경하고 Flask를 재시작합니다. `runtime_settings.py`는 `.env` 값이 없을 때만 쓰는 기본값이므로 장비 IP 변경마다 수정하지 않습니다.
-- 실제 ESP32 stream URL, 영상 경로, 모델 경로는 공개 저장소의 기본값에 의존하지 말고 로컬 `.env`에서 설정하세요.
+```bash
+mvn -f project_ssa_spring/pom.xml \
+  org.apache.maven.plugins:maven-dependency-plugin:3.8.1:copy \
+  -Dartifact=org.eclipse.jdt:ecj:3.35.0 \
+  -DoutputDirectory="$PWD/project_ssa_spring/target/tomcat-java17"
+bash project_ssa_spring/scripts/deploy-tomcat-java17.sh --check
+```
+
+`--check`는 WAR의 JDBC 배치·컨테이너 API 중복·ECJ Java 17 호환성을 검사하며 서비스를 변경하지 않습니다. 실제 배포는 검토·승인 후 관리자가 아래 명령을 실행합니다. 기존 WAR를 백업하고 교체하며 Tomcat을 재시작합니다.
+
+```bash
+sudo bash project_ssa_spring/scripts/deploy-tomcat-java17.sh --apply
+```
+
+ECJ 로더 순서와 과거 원인 분석은 [WSL2 배포 안내](project_ssa_spring/DEPLOYMENT_WSL2.md)를 참고합니다. Servlet/JSP API는 `provided` scope이며 Jasper·컴파일러 JAR를 WAR의 `WEB-INF/lib`에 임의로 넣지 않습니다.
+
+### 4. Spring 관리자 화면에서 Flask 시작·종료
+
+현재 기본 운용은 Spring 관리자 화면의 Flask ON/OFF 버튼입니다. Spring이 아래 두 경로의 `run_server.py`와 가상환경 Python을 실행합니다. 값은 저장소 루트에서 계산해 **Tomcat 서비스 설정에 절대경로로** 지정합니다. 셸에만 export해서는 서비스에 전달되지 않습니다.
+
+| 변수 | 지정 대상 |
+| --- | --- |
+| `SSA_FLASK_PROJECT_DIR` | 저장소 아래 `project_ssa_yolo`의 절대경로 |
+| `SSA_FLASK_PYTHON_EXECUTABLE` | 저장소 아래 `project_ssa_yolo/.venv/bin/python`의 절대경로 |
+| `SSA_FLASK_CONTROL_ENABLED` | `true`일 때 관리자 시작·종료 허용 |
+| `SSA_FLASK_STREAM_URL` | 현재 기본 `http://localhost:5000/stream` |
+| `SSA_FLASK_CONTROL_TOKEN` | Spring·Flask 양쪽에 동일한 24자 이상 비밀 토큰 |
+
+제어 기능은 같은 호스트의 `localhost`, `127.0.0.1`, `::1` Flask만 지원합니다. 별도 원격 실행·임의 Python 프로세스 강제 종료는 지원하지 않습니다. 종료 API는 `run_server.py`의 정상 종료 callback을 사용하므로 `flask run`으로 대체하지 않습니다. Flask `.env`에는 배포별 `SSA_FLASK_SECRET_KEY`, `SSA_FLASK_CSRF_SECRET_KEY`도 설정합니다. 실제 값은 공개하지 않습니다.
+
+시작 후 `/stream/health`의 `processReady`는 프로세스 응답, `aiReady`는 CUDA 연산·커스텀 모델 로딩·워밍업 추론 결과, `ready`는 AI와 서비스 초기화 완료를 나타냅니다. health 조회 자체는 초기화를 실행하지 않습니다. Spring의 보호된 초기화 요청이 AI 준비를 수행하며 화면에서 **Flask ON · AI 준비**를 확인한 뒤 필요한 영상 채널을 시작합니다.
+
+`SSA_SPRING_HOST`는 Flask가 callback할 Spring의 **context path까지 포함한 base URL**입니다. 현재 코드 기본값은 위 Spring 접속 주소와 같습니다. Flask 주소/포트를 바꾸면 Spring의 proxy·제어 URL도 함께 일치시킵니다. 브라우저의 URL 경로와 파일 저장 경로를 혼동하지 않습니다.
+
+### 5. 터미널에서 Flask를 실행하는 경우
+
+Spring 버튼으로 실행된 Flask가 없는 상태에서만 사용합니다. 기존 모델·영상·Spring callback 설정을 준비한 뒤 실행하며 sudo로 Flask를 구동하지 않습니다.
+
+```bash
+project_ssa_yolo/.venv/bin/python -B project_ssa_yolo/run_server.py
+```
+
+기본 `FLASK_RUN_HOST`는 `0.0.0.0`, 포트는 `5000`입니다. 단일 threaded Werkzeug 서버를 사용하고 debug reloader는 켜지 않습니다. 터미널 실행만으로 AI 준비나 영상 가동이 완료됐다고 판단하지 않습니다. 실제 AI 준비는 Spring 초기화 요청/채널 시작으로 확인하며, 채널 시작은 기존 정책에 따라 Oracle 이벤트·Discord 알림을 발생시킬 수 있습니다.
+
+### 6. 읽기 전용 상태·권한 점검
+
+```bash
+systemctl is-active tomcat10.service
+curl --fail --silent --show-error \
+  http://localhost:5000/stream/health
+sudo project_ssa_yolo/.venv/bin/python -B \
+  project_ssa_spring/scripts/linux-runtime-permissions.py --full
+```
+
+마지막 명령은 실제 Tomcat 계정과 mount namespace에서 검사하기 위해 관리자 인증이 필요하지만 기본 동작은 읽기 전용입니다. 파일 쓰기 시험·GPU 추론·Oracle SELECT·수정 모드는 별도 옵션입니다. 기본 점검만으로 카메라·Discord·ESP32를 실행하지 않습니다. 로그는 `journalctl -u tomcat10.service` 및 `/var/log/tomcat10`에서 확인하되 공유 전 비밀 값을 제거합니다.
+
+### Windows / Eclipse 개발 호환성
+
+Windows 개발 코드 경로는 유지합니다. 다만 위 Linux 검증을 Windows GPU 환경 검증으로 간주하지 않습니다. Windows에서는 그 OS의 실제 파일 경로와 COM 포트를 지정하고, 가상환경 Python은 `.venv\Scripts\python.exe`를 사용합니다.
+
+- Eclipse의 Existing Maven Project로 `project_ssa_spring`을 import하고 Java 17·Tomcat 10.1을 선택합니다.
+- Tomcat의 **Open Launch Configuration → Environment**에 Spring 변수를 설정합니다. Linux systemd 환경 파일은 Eclipse에 자동 반영되지 않습니다.
+- 이미 구성된 Windows 가상환경에서는 아래처럼 서버를 시작합니다. 새 패키지 설치 시 Windows용 조합은 별도로 검증하며 Linux lock 파일을 그대로 적용한다고 가정하지 않습니다.
+
+```powershell
+Set-Location project_ssa_yolo
+.\.venv\Scripts\python.exe run_server.py
+```
+
+기존 Flask 화면이 필요하면 실행 전에 `$env:SSA_FLASK_PROFILE='local'`과 기존 DB의 `SSA_SQLITE_PATH`를 설정합니다. Linux에서도 같은 모드는 `export SSA_FLASK_PROFILE=local`로 선택합니다. 기존 SQLite 데이터와 모델·영상은 삭제하거나 자동 이전하지 않습니다.
 
 ## 외부 연동
 
@@ -480,40 +528,46 @@ Discord notifier / Kakao Local API 설정 / Open-Meteo / NOAA 우주환경
 
 ## 테스트
 
-### Spring
+아래 명령은 저장소 루트 기준입니다. Spring 단위 테스트는 실제 Oracle을 호출하지 않으며 Python 회귀 테스트는 장치·추론·외부 HTTP를 mock합니다. 테스트를 위해 운영 서비스나 영상을 시작하지 않습니다.
 
-Spring 테스트는 JUnit 5와 Mockito로 `src/test/java`에 구성되어 있습니다. Service, Security handler, Controller, Mapper XML, 예외 처리, PDF cache 관련 테스트가 포함됩니다.
-
-```powershell
-Set-Location project_ssa_spring
-mvn test
+```bash
+mvn -f project_ssa_spring/pom.xml test
+(
+  cd project_ssa_yolo
+  SSA_AUTO_START_DETECTION_WORKERS=false PYTHONDONTWRITEBYTECODE=1 \
+    .venv/bin/python -m pytest tests -q -p no:cacheprovider
+)
 ```
 
-최근 실행 범위와 결과는 [Spring 테스트 안내](project_ssa_spring/TESTING.md)를 참고합니다. 운영 연동 검증과 단위 테스트는 구분합니다.
+Python 테스트는 검증된 가상환경의 pytest를 사용합니다. `requirements-test.txt`는 전체 실행 의존성과 pytest를 포함하며, 기존 환경에 다시 설치할 때도 검증한 버전 제약을 유지합니다. `SSA_TEST_SQLITE_PATH`를 운영 데이터로 지정하지 않습니다.
 
-### Python
+| 검사 | 최근 결과와 범위 |
+| --- | --- |
+| Python 전체 회귀 | 88 passed |
+| 보강한 관련 Python 테스트 | 37 passed, 로컬 모드 메모리 DB 읽기·쓰기 및 임시 파일 보존 포함 |
+| Maven `verify` | 120 tests, 실패/오류 0, skip 2 |
+| 별도 Java→Flask 격리 검사 | 4 passed, SQLite 없는 AI 모드에서 실제 CUDA 준비·중복 실행 방지·종료 |
+| 별도 4채널 GPU 검사 | 모델 1개 공유·동시 MJPEG 4개 통과. ESP32는 로컬 영상 모의이며 외부 전송 차단 |
 
-Flask/YOLO 회귀 테스트는 `project_ssa_yolo/tests`에 있으며 실제 COM 포트, YOLO 추론, Discord 전송, ESP32 보드를 사용하지 않도록 mock 기반으로 구성되어 있습니다.
-
-```powershell
-Set-Location project_ssa_yolo
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-test.txt
-python -m pytest tests -q -p no:cacheprovider
-```
-
-최근 격리 실행 범위와 의존성 제한은 [Python 테스트 안내](project_ssa_yolo/TESTING.md)를 참고합니다. 실제 모델 추론·장비 통신은 단위 테스트에서 수행하지 않습니다.
+위 결과는 앞선 환경 구성·권한 정상화 작업의 기록입니다. README 수정 때문에 운영 서비스·실전송 검사를 다시 실행하지 않습니다. 세부 명령과 제한은 [Spring 테스트 안내](project_ssa_spring/TESTING.md), [Python 테스트 안내](project_ssa_yolo/TESTING.md)를 참고합니다.
 
 ## 주요 Trouble Shooting
 
 | 이슈 | 대응 |
 | --- | --- |
+| JSP HTTP 500 / `UnsupportedClassVersionError` | Java 17과 실제 ECJ 클래스 버전을 확인하고 배포 스크립트의 `--check`를 실행. 시스템 JAR 삭제나 WAR에 Jasper 추가로 우회하지 않음 |
+| `Permission denied` | 파일 모드뿐 아니라 부모 검색 권한·ACL·venv의 실제 인터프리터·Tomcat namespace 확인. 기본 읽기 전용 권한 진단 도구 사용 |
+| Oracle 접속 실패 | Windows Oracle의 실제 listener/service와 WSL에서 접근 가능한 기존 주소 확인. 계정·포트 프록시·방화벽을 추측으로 변경하지 않음 |
+| Flask ON · AI 미준비 | `/stream/health`의 `processReady`, `aiReady`, `ready`와 초기화 오류를 구분. 모델 경로·CUDA·실행 인스턴스를 확인하고 상태를 강제로 true로 바꾸지 않음 |
+| AI 모드에서 SQLite 요구 | `run_server.py`와 `SSA_FLASK_PROFILE=ai` 확인. 기존 `FLASK_APP=create_app("local")` 실행이나 서비스 변수 덮어쓰기 여부 점검 |
+| Discord 알림 없음 | `SSA_OPTIONAL_IO_ENABLED`, notifier/report worker 상태, 이벤트 조건·cooldown·Spring callback 결과 확인. 운영 채널 테스트 메시지는 사전 승인 없이 발송하지 않음 |
+| PDF 생성 실패 | 캐시 쓰기 권한과 실제 브라우저 실행 파일을 구분해 확인. 경로 권한 검사 성공만으로 렌더링 성공으로 판단하지 않음 |
 | Java UTF-8 BOM | `illegal character '\ufeff'` 문제를 피하도록 소스/설정 파일 인코딩을 UTF-8로 통일 |
 | ESP32 배터리 잔량 | GPIO2 ADC의 raw 값에 40.2kΩ / 10kΩ 분배비(약 `5.02`)와 calibration을 적용하고, 3.0V~4.25V 범위를 0~100%로 환산 |
 | ESP32 부저 초기 동작 | 전용 부저 worker가 `mpremote` 호출을 직렬화하고, 시작 초기화 명령을 통해 수동 최초 실행 의존을 줄임 |
 | VideoCapture lifecycle | `SourceWorker`만 capture를 소유/해제하도록 해 HTTP generator·Discord worker와의 경쟁을 방지 |
 | ESP32-CAM MJPEG 연결 timeout | 브라우저에서는 정상이나 OpenCV/FFmpeg에서 약 1초 후 끊기던 문제를 ESP32 전용 HTTP MJPEG reader로 분리했다. `requests(stream=True)` 연결 하나에서 JPEG SOI/EOI를 찾아 `cv2.imdecode()`하며, 연결 5초·read 2초·`1→2→4→5초` 재연결 backoff와 제한된 버퍼를 적용한다. HTTP generator는 worker를 시작하지 않고 latest frame만 읽는다. |
-| ESP32-CAM IP 변경 | 실행 값은 `run_server.py`가 시작 시 읽는 로컬 `.env`의 `SSA_ESP32_STREAM_URL`이 우선한다. IP 변경 시 `.env`만 수정하고 Flask를 재시작한다. 연결 문제는 `python scripts/diagnostics/esp32_stream_check.py`로 YOLO·COM 포트 없이 첫 프레임 수신 여부를 확인한다. |
+| ESP32-CAM IP 변경 | `SSA_ESP32_STREAM_URL`은 프로세스 환경변수 → `.env` 순서로 적용된다. 실제 적용 위치를 수정한 뒤 Flask를 재시작한다. 장비 연결 검사가 승인된 경우 `project_ssa_yolo/.venv/bin/python project_ssa_yolo/scripts/diagnostics/esp32_stream_check.py`로 YOLO·COM 포트 없이 첫 프레임 수신 여부를 확인한다. |
 | Flask reloader | `run_server.py`에서 reloader를 끄고 단일 process로 실행해 native resource와 serial port 중복 점유를 방지 |
 | 외부 API 실패 전파 | Service 계층에서 외부 연동 예외를 분리하고 `CommonExceptionAdvice`가 JSP 또는 JSON의 안전한 오류 응답으로 변환 |
 | Git 민감정보 | `jdbc.properties`, `.env`, pycache, pyc, logs, 모델·영상 산출물을 ignore하고 example 파일만 공유 |
@@ -521,32 +575,41 @@ python -m pytest tests -q -p no:cacheprovider
 ## 저장소 구조
 
 ```text
-ProjectSSASpring/
+ProjectSSASpring-Linux-git/
 ├─ project_ssa_spring/                 # Spring MVC / JSP / MyBatis / Oracle
 │  ├─ src/main/java/
 │  ├─ src/main/resources/
 │  ├─ src/main/webapp/
 │  ├─ src/test/java/
-│  ├─ db_script/
-│  │  ├─ migrations/
-│  │  ├─ 01_schema.sql
-│  │  ├─ 02_sequences.sql
-│  │  └─ 03_seed_system.sql
+│  ├─ db_script/                      # 신규 개발 스키마 및 과거 migration
+│  ├─ scripts/                        # WAR 배포·권한 진단·격리 Flask 검사
+│  ├─ DEPLOYMENT_WSL2.md
+│  ├─ UPLOAD_STORAGE.md
 │  └─ pom.xml
 ├─ project_ssa_yolo/                   # Flask / YOLO / ESP32 bridge
-│  ├─ apps/
+│  ├─ apps/                           # AI API 및 보존된 local 화면
+│  ├─ scripts/diagnostics/
 │  ├─ tests/
-│  ├─ .env.example
+│  ├─ .env.example                    # 실제 .env는 ignored
 │  ├─ requirements.txt
+│  ├─ requirements-ai.txt
 │  ├─ requirements-test.txt
+│  ├─ constraints-linux-cu126.txt
+│  ├─ requirements-linux-cu126.lock.txt
+│  ├─ GPU_ENVIRONMENT_LINUX.md
 │  └─ run_server.py
+├─ html-filter-1.0.jar.zip             # 로컬 Maven 의존성 원본
+├─ PATH_CONFIGURATION_LINUX.md
+├─ LINUX_RUNTIME_PERMISSIONS.md
 ├─ .gitignore
 └─ README.md
 ```
 
+`.venv`, 모델 가중치, 영상, SQLite 데이터, 로그, `target/`는 로컬에 존재할 수 있지만 Git 추적 대상이 아닙니다. ignored 파일을 기존 프로젝트에서 무조건 복사하거나 운영 데이터와 덮어쓰지 않습니다.
+
 ## 보안 및 Git 공개 전 확인 사항
 
-- `.env`, `jdbc.properties`, API Key, DB 비밀번호, 실제 Discord Webhook, 개인 경로, 장비 IP는 커밋하지 않습니다.
+- `.env`, `jdbc.properties`, API Key, DB 비밀번호, 실제 Discord Webhook, 운영 장비 IP는 커밋하지 않습니다.
 - `.gitignore`는 Eclipse/Tomcat 산출물, Python cache, 모델 파일, 영상 파일, 로그를 제외하도록 구성되어 있습니다.
 - `project_ssa_spring/src/main/resources/com/spring/properties/jdbc.properties.example`과 `project_ssa_yolo/.env.example`만 템플릿으로 사용합니다.
 - Flask session/CSRF secret은 `SSA_FLASK_SECRET_KEY`, `SSA_FLASK_CSRF_SECRET_KEY` 환경변수로 관리합니다. 로컬 미설정 시에는 프로세스마다 임시 난수가 생성되므로, 재시작 후에도 세션을 유지해야 하는 배포 환경에서는 반드시 `.env` 또는 배포 환경변수에 고정된 난수를 설정해야 합니다.

@@ -1,5 +1,7 @@
 # Linux / WSL2 커스텀 YOLO GPU 실행 환경
 
+최신 운영 권한·SQLite 분리 결과는 [Linux 실행 권한 안내](../LINUX_RUNTIME_PERMISSIONS.md)를 따른다. 현재 기본 Flask `ai` 모드는 SQLite 없이 실행하며, 실제 서비스 계정·mount namespace에서 기존 커스텀 모델과 세 영상의 CUDA 추론을 검증했다. 기존 `local` 화면과 DB 파일은 보존한다. 아래 SQLite 필수·운영 미반영 내용은 각 조사 당시 기록이다. Python/CUDA/Ultralytics/모델은 변경하지 않았다.
+
 ## 확인한 환경과 버전
 
 2026-10-17 사용자 확인을 받은 기존 커스텀 `yolov8n_train-6/weights/best.pt`로 검증했다. 기존 가중치·영상·SQLite·실제 `.env`·JDBC 설정은 변경하지 않았다. 시스템 패키지, Windows/Linux 드라이버, CUDA Toolkit, 운영 Tomcat 서비스 설정도 변경하지 않았다.

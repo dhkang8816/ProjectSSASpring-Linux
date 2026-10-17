@@ -134,18 +134,20 @@ def access_probe(payload):
                 not item.get("writable") or value["write"]) else "MISSING_OR_DENIED"
             if payload["verify"] and item.get("writable") and item.get("directory") and path.is_dir():
                 probe = None
+                created = False
                 try:
                     probe = path / (".ssa-permission-probe-" + uuid.uuid4().hex)
                     fd = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
-                    os.write(fd, b"SSA disposable permission probe\n")
-                    os.close(fd)
+                    created = True
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(b"SSA disposable permission probe\n")
                     info = probe.stat()
                     value["write_probe"] = {"readback": probe.read_bytes() == b"SSA disposable permission probe\n",
                                             "gid": info.st_gid, "mode": oct(stat.S_IMODE(info.st_mode))}
                 except OSError as error:
                     value["write_probe"] = {"error": type(error).__name__}
                 finally:
-                    if probe is not None:
+                    if created:
                         probe.unlink()  # only this process's uniquely-created probe
         except OSError as error:
             value.update(status="INACCESSIBLE", error=type(error).__name__)

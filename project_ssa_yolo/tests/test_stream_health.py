@@ -61,6 +61,18 @@ class StreamHealthRouteTest(unittest.TestCase):
         self.assertIn("sqlalchemy", app.extensions)
         for blueprint in ("auth", "crud", "detect_data", "main", "control_page"):
             self.assertIn(blueprint, app.blueprints)
+        from apps.extensions import db
+        from apps.db_test.project_db import Animals
+        with app.app_context():
+            self.assertEqual(":memory:", db.engine.url.database)
+            db.create_all()
+            try:
+                db.session.add(Animals(animal_type="cat", animal_count=2))
+                db.session.commit()
+                self.assertEqual(2, Animals.query.filter_by(animal_type="cat").one().animal_count)
+            finally:
+                db.session.remove()
+                db.drop_all()
 
     def test_shutdown_requires_token_and_uses_runtime_callback(self):
         shutdown_called = threading.Event()

@@ -196,6 +196,18 @@ class ServicePermissionProbeTest(unittest.TestCase):
             self.assertTrue(result["paths"][0]["write_probe"]["readback"])
             self.assertEqual([existing], list(Path(directory).iterdir()))
             self.assertEqual(b"preserved user data", existing.read_bytes())
+            collision = Path(directory) / ".ssa-permission-probe-collision"
+            collision.write_bytes(b"another process owns this file")
+            previous_umask = os.umask(0o007)
+            try:
+                with patch.object(helper.os, "setgroups"), patch.object(helper.os, "setgid"), \
+                        patch.object(helper.os, "setuid"), \
+                        patch.object(helper.uuid, "uuid4", return_value=SimpleNamespace(hex="collision")):
+                    result = helper.access_probe(payload)
+            finally:
+                os.umask(previous_umask)
+            self.assertEqual("FileExistsError", result["paths"][0]["write_probe"]["error"])
+            self.assertEqual(b"another process owns this file", collision.read_bytes())
 
 
 class SnapshotPathTest(unittest.TestCase):
