@@ -1,6 +1,9 @@
 package com.spring.util;
 
+import java.io.File;
 import java.net.URI;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 
 
 public final class RuntimeSettings {
@@ -14,6 +17,20 @@ public final class RuntimeSettings {
             value = System.getenv(name);
         }
         return (value == null || value.trim().isEmpty()) ? defaultValue : value.trim();
+    }
+
+    public static Path uploadRoot() {
+        String defaultPath = File.separatorChar == '\\' ? "C:\\upload" : "/var/lib/project-ssa/uploads";
+        String configuredPath = text("SSA_UPLOAD_ROOT", defaultPath);
+        try {
+            Path path = Path.of(configuredPath);
+            if (!path.isAbsolute()) {
+                throw new IllegalStateException("SSA_UPLOAD_ROOT must be an absolute path: " + configuredPath);
+            }
+            return path.normalize();
+        } catch (InvalidPathException ex) {
+            throw new IllegalStateException("SSA_UPLOAD_ROOT is not a valid path.", ex);
+        }
     }
 
     public static int positiveInt(String name, int defaultValue) {

@@ -1,7 +1,10 @@
 package com.spring.util;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -19,26 +22,33 @@ public class MultipartFileUpload {
 		if (multi == null || multi.isEmpty()) {
 			throw new EmptyMultipartFileException();
 		}
+		String originalName = multi.getOriginalFilename();
+		UploadStorage.validateFileName(originalName);
 		String uuid = UUID.randomUUID().toString().replace("-", "");
-		String fileName = uuid + "$$" + multi.getOriginalFilename();
-		
-		File storeFile = new File(uploadPath, fileName);
-		if (!storeFile.getParentFile().exists()) {
-			storeFile.getParentFile().mkdirs();
-		}
-		multi.transferTo(storeFile);
+		String fileName = uuid + "$$" + originalName;
+		Path uploadDirectory = UploadStorage.createDirectory(uploadDirectory(uploadPath));
+		transferFile(uploadDirectory, fileName, multi);
 
 		return fileName;
 	}
 
 	public static String saveFile(String uploadPath, String oldFile, MultipartFile multi)
 			throws EmptyMultipartFileException, IllegalStateException, IOException {
+		Path directory = uploadDirectory(uploadPath);
+		if (oldFile != null && !oldFile.isEmpty() && !"noImage.jpg".equals(oldFile)) {
+			// Validate the old DB value before writing or deleting any image.
+			UploadStorage.resolveFile(directory, oldFile);
+		}
 		String fileName = saveFile(uploadPath, multi);
-		if (oldFile != null && !oldFile.isEmpty() && !oldFile.equals("noImage.jpg")) {
-			File file = new File(uploadPath, oldFile);
-			if (file.exists()) {
-				file.delete();
+		try {
+			UploadStorage.deleteFile(directory, oldFile);
+		} catch (IOException | SecurityException ex) {
+			try {
+				UploadStorage.deleteFile(directory, fileName);
+			} catch (IOException | SecurityException cleanupFailure) {
+				ex.addSuppressed(cleanupFailure);
 			}
+			throw ex;
 		}
 		
 		return fileName;
@@ -63,18 +73,37 @@ public class MultipartFileUpload {
 		}
 
 		String fileName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
-		File uploadDirectory = new File(uploadPath).getCanonicalFile();
-		if (!uploadDirectory.exists() && !uploadDirectory.mkdirs()) {
-			throw new IOException("Unable to create upload directory.");
-		}
-
-		File storeFile = new File(uploadDirectory, fileName).getCanonicalFile();
-		if (!storeFile.getParentFile().equals(uploadDirectory)) {
-			throw new IOException("Invalid upload path.");
-		}
-
-		multi.transferTo(storeFile);
+		Path uploadDirectory = UploadStorage.createDirectory(uploadDirectory(uploadPath));
+		transferFile(uploadDirectory, fileName, multi);
 		return fileName;
+	}
+
+	private static void transferFile(Path directory, String fileName, MultipartFile multi) throws IOException {
+		Path destination = UploadStorage.resolveFile(directory, fileName);
+		if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
+			throw new IOException("Generated upload destination already exists.");
+		}
+		try {
+			multi.transferTo(destination.toFile());
+		} catch (IOException | RuntimeException ex) {
+			try {
+				Files.deleteIfExists(destination);
+			} catch (IOException | RuntimeException cleanupFailure) {
+				ex.addSuppressed(cleanupFailure);
+			}
+			throw ex;
+		}
+	}
+
+	private static Path uploadDirectory(String uploadPath) throws IOException {
+		if (uploadPath == null || uploadPath.isBlank()) {
+			throw new IOException("Upload directory is required.");
+		}
+		try {
+			return Path.of(uploadPath);
+		} catch (InvalidPathException ex) {
+			throw new IOException("Invalid upload directory.", ex);
+		}
 	}
 
 	private static String getExtension(String originalName) {

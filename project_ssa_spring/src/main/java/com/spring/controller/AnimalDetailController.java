@@ -1,16 +1,12 @@
 package com.spring.controller;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.io.IOUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -38,6 +34,7 @@ import com.spring.service.AnimalCounterService;
 import com.spring.service.AnimalDetailService;
 import com.spring.service.CommonCodeService;
 import com.spring.util.MultipartFileUpload;
+import com.spring.util.UploadStorage;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -48,7 +45,6 @@ import lombok.extern.log4j.Log4j2;
 @Log4j2
 public class AnimalDetailController {
 
-    private static final String ANIMAL_UPLOAD_PATH = "C:" + File.separator + "upload" + File.separator + "animals";
     private static final String DEFAULT_IMAGE_NAME = "noImage.jpg";
 
     private final AnimalDetailService animalDetailService;
@@ -83,7 +79,6 @@ public class AnimalDetailController {
     public String register(AnimalDetailVO vo, RedirectAttributes rttr,
             @RequestParam(value = "popup", defaultValue = "false") boolean popup,
             HttpServletRequest request) {
-        getAnimalUploadPath(request);
         String uploadedPicture = normalizeUploadedPicture(vo.getAnimalPicture(), request);
         vo.setAnimalPicture(uploadedPicture == null ? DEFAULT_IMAGE_NAME : uploadedPicture);
         try {
@@ -112,7 +107,6 @@ public class AnimalDetailController {
     public String modify(AnimalDetailVO vo, PageMaker pageMaker, RedirectAttributes rttr,
             @RequestParam(value = "popup", defaultValue = "false") boolean popup,
             HttpServletRequest request) {
-        getAnimalUploadPath(request);
         AnimalDetailVO oldAnimal = animalDetailService.getAnimalById(vo.getAnimalId());
         String oldPicture = oldAnimal == null ? null : oldAnimal.getAnimalPicture();
         String uploadedPicture = normalizeUploadedPicture(vo.getAnimalPicture(), request);
@@ -178,22 +172,23 @@ public class AnimalDetailController {
             return ResponseEntity.badRequest().build();
         }
         try {
-            File imageFile = getStoredAnimalPicture(fileName, request);
-            if (imageFile == null || !imageFile.isFile()) {
-                imageFile = getStoredAnimalPicture(DEFAULT_IMAGE_NAME, request);
+            Path uploadDirectory = null;
+            try {
+                uploadDirectory = UploadStorage.directory("animals");
+            } catch (IOException | RuntimeException e) {
+                log.warn("Animal directory could not be resolved; serving bundled default image", e);
             }
-            if (imageFile == null || !imageFile.isFile()) {
-                return ResponseEntity.notFound().build();
+            ResponseEntity<byte[]> response = UploadStorage.readImage(uploadDirectory, fileName,
+                    request.getServletContext(), "/resources/images/noImage.jpg");
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return response;
             }
-
-            MediaType mediaType = imageFile.getName().toLowerCase().endsWith(".png")
-                    ? MediaType.IMAGE_PNG : MediaType.IMAGE_JPEG;
-            return ResponseEntity.ok()
+            return ResponseEntity.status(response.getStatusCode())
+                    .headers(response.getHeaders())
                     .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                    .contentType(mediaType)
-                    .body(Files.readAllBytes(imageFile.toPath()));
-        } catch (IOException e) {
-            log.warn("Animal image could not be read");
+                    .body(response.getBody());
+        } catch (IOException | RuntimeException e) {
+            log.warn("Animal image could not be read", e);
             return ResponseEntity.notFound().build();
         }
     }
@@ -217,28 +212,8 @@ public class AnimalDetailController {
         return ResponseEntity.status(status).body(response);
     }
 
-    private String getAnimalUploadPath(HttpServletRequest request) {
-        File uploadDirectory = new File(ANIMAL_UPLOAD_PATH);
-        if (!uploadDirectory.exists() && !uploadDirectory.mkdirs()) {
-            log.warn("Animal upload directory could not be created");
-        }
-
-        File defaultImage = new File(uploadDirectory, DEFAULT_IMAGE_NAME);
-        if (!defaultImage.exists()) {
-            String resourcePath = request.getServletContext().getRealPath("/resources/images/noImage.jpg");
-            if (resourcePath != null) {
-                File sourceImage = new File(resourcePath);
-                if (sourceImage.isFile()) {
-                    try (InputStream input = new FileInputStream(sourceImage);
-                            FileOutputStream output = new FileOutputStream(defaultImage)) {
-                        IOUtils.copy(input, output);
-                    } catch (IOException e) {
-                        log.warn("Animal default image could not be initialized");
-                    }
-                }
-            }
-        }
-        return uploadDirectory.getPath();
+    private String getAnimalUploadPath(HttpServletRequest request) throws IOException {
+        return UploadStorage.directory("animals").toString();
     }
 
     private String normalizeUploadedPicture(String pictureName, HttpServletRequest request) {
@@ -255,10 +230,9 @@ public class AnimalDetailController {
             return null;
         }
         try {
-            File uploadDirectory = new File(getAnimalUploadPath(request)).getCanonicalFile();
-            File candidate = new File(uploadDirectory, fileName).getCanonicalFile();
-            return candidate.getParentFile().equals(uploadDirectory) ? candidate : null;
-        } catch (IOException e) {
+            return UploadStorage.resolveFile(UploadStorage.directory("animals"), fileName).toFile();
+        } catch (IOException | RuntimeException e) {
+            log.warn("Animal image path could not be resolved", e);
             return null;
         }
     }
@@ -269,12 +243,13 @@ public class AnimalDetailController {
     }
 
     private void deleteUploadedAnimalPicture(String fileName, HttpServletRequest request) {
-        if (fileName == null || DEFAULT_IMAGE_NAME.equals(fileName)) {
+        if (!isSafeAnimalPictureName(fileName) || DEFAULT_IMAGE_NAME.equals(fileName)) {
             return;
         }
-        File file = getStoredAnimalPicture(fileName, request);
-        if (file != null && file.isFile() && !file.delete()) {
-            log.warn("Unused animal image could not be deleted");
+        try {
+            UploadStorage.deleteFile(UploadStorage.directory("animals"), fileName);
+        } catch (IOException | RuntimeException e) {
+            log.warn("Unused animal image could not be deleted: {}", fileName, e);
         }
     }
 

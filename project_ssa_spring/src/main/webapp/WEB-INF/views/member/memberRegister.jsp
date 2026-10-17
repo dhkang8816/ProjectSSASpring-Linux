@@ -197,7 +197,7 @@ button:active { transform: translateY(0); }
     <h2>관제소 신규 계정 등록</h2>
     
     
-    <form:form action="${pageContext.request.contextPath}/member/regist" method="post" enctype="multipart/form-data">
+    <form:form id="memberRegisterForm" action="${pageContext.request.contextPath}/member/regist" method="post" enctype="multipart/form-data">
         
         
         <c:if test="${param.popup eq 'true'}"><input type="hidden" name="popup" value="true" /></c:if>
@@ -220,7 +220,7 @@ button:active { transform: translateY(0); }
             <div class="form-row">
                 <span class="form-label">사번 (아이디)</span>
                 <div class="form-value-slot">
-                    <input type="text" name="memberId" required placeholder="사번을 입력하세요">
+                    <input type="text" name="memberId" required pattern=".*\S.*" placeholder="사번을 입력하세요">
                 </div>
             </div>
             
@@ -228,7 +228,7 @@ button:active { transform: translateY(0); }
             <div class="form-row">
                 <span class="form-label">비밀번호</span>
                 <div class="form-value-slot">
-                    <input type="password" name="password" required placeholder="초기 비밀번호 셋업">
+                    <input type="password" name="password" required pattern=".*\S.*" placeholder="초기 비밀번호 셋업">
                 </div>
             </div>
             
@@ -236,7 +236,7 @@ button:active { transform: translateY(0); }
             <div class="form-row">
                 <span class="form-label">이름</span>
                 <div class="form-value-slot">
-                    <input type="text" name="name" required placeholder="성명 입력">
+                    <input type="text" name="name" required pattern=".*\S.*" placeholder="성명 입력">
                 </div>
             </div>
             
@@ -244,7 +244,7 @@ button:active { transform: translateY(0); }
             <div class="form-row">
                 <span class="form-label">소속 부서</span>
                 <div class="form-value-slot">
-                    <input type="text" name="department" placeholder="부서명 입력">
+                    <input type="text" name="department" required pattern=".*\S.*" placeholder="부서명 입력">
                 </div>
             </div>
             
@@ -260,7 +260,7 @@ button:active { transform: translateY(0); }
             <div class="form-row">
                 <span class="form-label">이메일 주소</span>
                 <div class="form-value-slot">
-                    <input type="email" name="email" placeholder="example@domain.com">
+                    <input type="email" name="email" required pattern=".*\S.*" placeholder="example@domain.com">
                 </div>
             </div>
         </div> 
@@ -276,6 +276,32 @@ button:active { transform: translateY(0); }
 <script src="${pageContext.request.contextPath}/resources/js/popup-support.js"></script>
 </body>
 <script>
+	(function validateRequiredMemberFields() {
+		var form = document.getElementById('memberRegisterForm');
+		var requiredMessages = {
+			memberId: '사번(아이디)을 입력해 주세요.',
+			password: '비밀번호를 입력해 주세요.',
+			name: '이름을 입력해 주세요.',
+			department: '소속 부서를 입력해 주세요.',
+			email: '이메일 주소를 입력해 주세요.'
+		};
+
+		Object.keys(requiredMessages).forEach(function(name) {
+			var field = form.elements.namedItem(name);
+			field.addEventListener('invalid', function() {
+				field.setCustomValidity('');
+				if (!field.value.trim()) {
+					field.setCustomValidity(requiredMessages[name]);
+				} else if (name === 'email' && field.validity.typeMismatch) {
+					field.setCustomValidity('올바른 이메일 주소를 입력해 주세요. (예: example@domain.com)');
+				}
+			});
+			field.addEventListener('input', function() {
+				field.setCustomValidity('');
+			});
+		});
+	})();
+
 	function previewImage(input) {
 		var preview = document.getElementById('imagePreview');
 		if (input.files && input.files[0]) {

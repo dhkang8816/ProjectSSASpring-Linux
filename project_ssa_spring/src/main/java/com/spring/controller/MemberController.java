@@ -1,15 +1,13 @@
 package com.spring.controller;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import jakarta.servlet.http.HttpServletRequest; // Tomcat 10 사양 준수
 
-import org.apache.commons.io.IOUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,10 +26,12 @@ import org.springframework.web.multipart.MultipartFile;
 import com.spring.cmd.PageMaker;
 import com.spring.dto.CommonCodeVO;
 import com.spring.dto.MemberVO;
+import com.spring.exception.InvalidRequestException;
 import com.spring.security.CustomUser;
 import com.spring.service.CommonCodeService;
 import com.spring.service.MemberService;
 import com.spring.util.MultipartFileUpload; // 유틸리티 연동
+import com.spring.util.UploadStorage;
 
 import lombok.extern.log4j.Log4j2;
 
@@ -39,6 +39,11 @@ import lombok.extern.log4j.Log4j2;
 @Controller
 @RequestMapping("/member")
 public class MemberController {
+
+    // Use the same address syntax as the registration form's HTML email input.
+    private static final Pattern REGISTRATION_EMAIL_PATTERN = Pattern.compile(
+            "[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+            + "(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*");
 
     @Autowired
     private MemberService memberService;
@@ -73,36 +78,37 @@ public class MemberController {
         }
     }
 
-    private String getUploadPath(HttpServletRequest request) {
-        String path = "C:" + File.separator + "upload" + File.separator + "member";
-        File uploadDir = new File(path);
-        if (!uploadDir.exists()) {
-            if (uploadDir.mkdirs()) {
-                log.info("🚨 [시스템 알림] 회원 프로필 저장 물리 폴더가 자동으로 생성되었습니다: {}", path);
-            }
+    private void deleteMemberPicture(String fileName) {
+        if (fileName == null || fileName.isEmpty() || "noImage.jpg".equals(fileName)) {
+            return;
         }
-        File noImageFile = new File(uploadDir, "noImage.jpg");
-        if (!noImageFile.exists()) {
-            jakarta.servlet.ServletContext context = request.getServletContext();
-            String resourcePath = context.getRealPath("/resources/images/member/noImage.jpg");
-            File originFile = new File(resourcePath);
-            
-            if (originFile.exists()) {
-                try (InputStream in = new FileInputStream(originFile);
-                     java.io.FileOutputStream out = new java.io.FileOutputStream(noImageFile)) {
-                    IOUtils.copy(in, out);
-                    log.info("🎯 [자가치유 완료] C:\\upload\\member\\noImage.jpg 파일이 자동 복사 및 배포되었습니다.");
-                    
-                } catch (Exception e) {
-                    log.error("회원 기본 이미지 복사 중 시스템 예외 발생: ", e);
-                }
-            } else {
-                log.warn("⚠️ [주의] 프로젝트 내부에 원본 noImage.jpg 파일이 존재하지 않습니다.");
-            }
+        try {
+            UploadStorage.deleteFile(UploadStorage.directory("member"), fileName);
+        } catch (IOException | RuntimeException e) {
+            log.warn("회원 사진을 안전하게 삭제하지 못했습니다. 파일명 = {}", fileName, e);
         }
-        
-        return path;
     }
+
+    private void validateRegistration(MemberVO member) {
+        requireRegistrationValue(member.getMemberId(), "사번(아이디)을 입력해 주세요.");
+        requireRegistrationValue(member.getPassword(), "비밀번호를 입력해 주세요.");
+        requireRegistrationValue(member.getName(), "이름을 입력해 주세요.");
+        requireRegistrationValue(member.getDepartment(), "소속 부서를 입력해 주세요.");
+        requireRegistrationValue(member.getEmail(), "이메일 주소를 입력해 주세요.");
+
+        String email = member.getEmail().strip();
+        if (!REGISTRATION_EMAIL_PATTERN.matcher(email).matches()) {
+            throw new InvalidRequestException("올바른 이메일 주소를 입력해 주세요. (예: example@domain.com)");
+        }
+        member.setEmail(email);
+    }
+
+    private void requireRegistrationValue(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new InvalidRequestException(message);
+        }
+    }
+
     @GetMapping("/registForm")
     public String registForm() {
         return "member/memberRegister"; 
@@ -114,22 +120,28 @@ public class MemberController {
                          @RequestParam(value = "pictureFile", required = false) MultipartFile pictureFile,
                          @RequestParam(value = "popup", defaultValue = "false") boolean popup,
                          HttpServletRequest request) throws Exception {
+        validateRegistration(member);
         log.info("회원가입 요청 진입: 사번(아이디) = {}", member.getMemberId());
         
         member.setPicture("noImage.jpg"); 
 
         if (pictureFile != null && !pictureFile.isEmpty()) {
-            String uploadPath = getUploadPath(request);
             try {
+                String uploadPath = UploadStorage.directory("member").toString();
                 String savedName = MultipartFileUpload.saveFile(uploadPath, pictureFile);
                 member.setPicture(savedName);
                 log.info("회원가입 프로필 사진 유틸리티 저장 성공: 파일명 = {}", savedName);
             } catch (Exception e) {
-                log.warn("회원가입 중 파일 업로드 예외 발생 -> 기본 이미지 배치");
+                log.warn("회원가입 중 파일 업로드 예외 발생 -> 기본 이미지 배치", e);
             }
         }
         
-        memberService.regist(member);
+        try {
+            memberService.regist(member);
+        } catch (Exception e) {
+            deleteMemberPicture(member.getPicture());
+            throw e;
+        }
         return popup ? "redirect:/member/list?popupSaved=true" : "redirect:/login"; 
     }
 
@@ -137,26 +149,20 @@ public class MemberController {
     @GetMapping("/getPicture")
     @ResponseBody
     public ResponseEntity<byte[]> getPicture(@RequestParam("id") String id, HttpServletRequest request) throws IOException {
-        InputStream in = null;
         try {
             MemberVO member = memberService.getMemberById(id);
-            String picture = (member == null || member.getPicture() == null) ? "noImage.jpg" : member.getPicture();
-            
-            String uploadPath = getUploadPath(request);
-            File file = new File(uploadPath, picture);
-            
-            if (!file.exists()) {
-                file = new File(uploadPath, "noImage.jpg");
+            String picture = member == null ? null : member.getPicture();
+            Path directory = null;
+            try {
+                directory = UploadStorage.directory("member");
+            } catch (IOException | RuntimeException e) {
+                log.warn("회원 사진 저장 경로에 접근할 수 없어 기본 이미지를 사용합니다.", e);
             }
-            
-            in = new FileInputStream(file);
-            return new ResponseEntity<byte[]>(IOUtils.toByteArray(in), HttpStatus.OK);
-            
+            return UploadStorage.readImage(directory, picture,
+                    request.getServletContext(), "/resources/images/member/noImage.jpg");
         } catch (Exception e) {
             log.error("이미지 스트림 전송 중 시스템 예외 발생: ", e);
             return new ResponseEntity<byte[]>(HttpStatus.NOT_FOUND);
-        } finally {
-            if (in != null) in.close();
         }
     }
     @GetMapping("/list")
@@ -225,37 +231,44 @@ public class MemberController {
         member.setPassword(passwordChangeRequested ? newPassword : null);
 
         String oldPictureName = oldMember.getPicture();
-        String uploadPath = getUploadPath(request);
+        String uploadedPicture = null;
         if ("true".equals(deleteOldPicture)) {
-            File oldFile = new File(uploadPath, oldPictureName);
-            if (oldFile.exists() && !oldPictureName.equals("noImage.jpg")) {
-                oldFile.delete();
-            }
             member.setPicture("noImage.jpg");
-            log.info("프로필 사진 삭제 처리 성공");
         } else if (pictureFile != null && !pictureFile.isEmpty()) {
             try {
-                String savedName = MultipartFileUpload.saveFile(uploadPath, oldPictureName, pictureFile);
-                member.setPicture(savedName);
-                log.info("새로운 프로필 사진 유틸리티 원스톱 물리 교체 성공: {}", savedName);
+                String uploadPath = UploadStorage.directory("member").toString();
+                uploadedPicture = MultipartFileUpload.saveFile(uploadPath, pictureFile);
+                member.setPicture(uploadedPicture);
+                log.info("새로운 프로필 사진 저장 성공: {}", uploadedPicture);
             } catch (Exception e) {
                 log.error("수정 중 파일 업로드 실패 예외 발생: ", e);
-                member.setPicture(oldPictureName); 
+                member.setPicture(oldPictureName);
             }
         } else {
-            member.setPicture(oldPictureName); 
+            member.setPicture(oldPictureName);
             log.info("기존 파일명 유지: {}", oldPictureName);
         }
 
         // A user-edit request is deliberately sent through a SQL statement that
         // has no STATUS or role columns, even if those values are forged in POST data.
-        int result = canManageAccount
-                ? memberService.modifyMember(member)
-                : memberService.modifyMemberProfile(member);
+        int result;
+        try {
+            result = canManageAccount
+                    ? memberService.modifyMember(member)
+                    : memberService.modifyMemberProfile(member);
+        } catch (Exception e) {
+            deleteMemberPicture(uploadedPicture);
+            throw e;
+        }
         if (result > 0) {
+            // Keep the previous photo until the database update succeeds.
+            if ("true".equals(deleteOldPicture) || uploadedPicture != null) {
+                deleteMemberPicture(oldPictureName);
+            }
             return popup ? "redirect:/member/list?popupSaved=true"
                     : "redirect:/member/detail?memberId=" + member.getMemberId();
         } else {
+            deleteMemberPicture(uploadedPicture);
             return "redirect:/member/modifyForm?memberId=" + member.getMemberId()
                     + "&error=true" + (popup ? "&popup=true" : "");
         }

@@ -211,7 +211,11 @@
             
             
             <a href="${pageContext.request.contextPath}/member/detail?memberId=${sessionScope.SPRING_SECURITY_CONTEXT.authentication.principal}" class="header-profile-link" title="내 정보 보기" data-detail-popup data-popup-name="memberDetail">
-                <img src="${pageContext.request.contextPath}/resources/images/member/noImage.jpg" class="header-profile-img" alt="프로필">
+                <c:url var="headerProfilePictureUrl" value="/member/getPicture">
+                    <c:param name="id" value="${sessionScope.SPRING_SECURITY_CONTEXT.authentication.name}" />
+                </c:url>
+                <img src="${headerProfilePictureUrl}" class="header-profile-img" alt="프로필"
+                     onerror="this.onerror=null;this.src='${pageContext.request.contextPath}/resources/images/member/noImage.jpg';">
             </a>
             
             
