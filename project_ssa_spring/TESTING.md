@@ -1,5 +1,14 @@
 # Spring test guide
 
+Latest GPU control verification: `mvn -o verify` with the opt-in isolated GPU
+test enabled passed **118 tests, 0 failures/errors, 1 Windows-only skip**.
+`FlaskRuntimeReadinessTest` checks HTTP/AI state separation and, only when
+`SSA_RUN_GPU_INTEGRATION=true`, a real local venv Flask process using CUDA.
+The GPU test is skipped in normal builds. The wrapper
+`scripts/check-flask-gpu.py` creates a temporary test-only DB/token/port,
+disables device/notification workers and never deploys to Tomcat. See
+[the GPU guide](../project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md).
+
 Run Spring unit tests from this directory after Maven is available:
 
 ```powershell

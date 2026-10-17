@@ -1,5 +1,29 @@
 # Python test guide
 
+## Current GPU environment verification
+
+The project `.venv` now contains the real runtime dependencies, including
+PyTorch 2.7.1+cu126 / torchvision 0.22.1+cu126 / Ultralytics 8.4.54. The suite
+passes **88 tests** with automatic detection workers disabled; no Ultralytics
+import stub is used in this run. The new device/readiness tests mock models and
+hardware explicitly. Existing test files also cover health readiness without a control token,
+mocked danger-event callback/notification worker flow, snapshot failure text alerts,
+and webhook-safe error logging. `pip check` reports no broken requirements.
+
+`test_stream_health.py` also checks that the AI profile starts with an empty
+SQLite setting and no SQLAlchemy/Migrate engine while the legacy testing profile
+keeps its DB and UI blueprints. `test_runtime_paths.py` verifies disposable
+permission probes preserve existing files. The separate Java-controlled real
+Flask lifecycle and four-channel GPU checks now select `ai` with no SQLite DB.
+The administrator audit also verified CUDA and all three actual video inputs
+as `tomcat` inside the running service's mount namespace. See
+[the runtime permission report](../LINUX_RUNTIME_PERMISSIONS.md) for scope.
+
+Real CUDA tensor/model inference, four concurrent MJPEG test clients, and the
+Java-controlled Flask lifecycle were checked separately. See
+[GPU_ENVIRONMENT_LINUX.md](GPU_ENVIRONMENT_LINUX.md) for commands and limits.
+Older temporary-environment results below describe the earlier path-only audit.
+
 Run the tests with the project virtual environment:
 
 ```powershell
@@ -22,6 +46,9 @@ The test suite mocks subprocess, HTTP and Flask state. It does not open COM6,
 run YOLO inference, send Discord notifications or require an ESP32 board.
 
 `requirements-test.txt` installs `requirements.txt` first and then adds pytest.
+`requirements-ai.txt` is an optional reduced runtime list; it does not install
+the legacy SQLAlchemy/Migrate/pandas dependencies. Existing installed packages
+and the validated CUDA lock file were preserved.
 
 `test_runtime_paths.py` covers project-relative resolution, invalid OS paths,
 missing files, upload permissions, external SQLite and failed snapshot writes.
@@ -29,7 +56,7 @@ missing files, upload permissions, external SQLite and failed snapshot writes.
 These checks do not establish that PyTorch/CUDA, real weights or USB devices
 are available. See [the path audit](../PATH_CONFIGURATION_LINUX.md).
 
-2026-10-17 verification used a separate Python 3.11 environment under `/tmp`,
+The earlier 2026-10-17 path-only verification used a separate Python 3.11 environment under `/tmp`,
 without changing the application's virtual environment or runtime requirements:
 
 - Path/training/buzzer/read-only-inspector tests: **41 passed**, using the normal test modules.

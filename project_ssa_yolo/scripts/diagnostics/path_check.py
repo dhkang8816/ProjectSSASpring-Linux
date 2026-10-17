@@ -65,8 +65,10 @@ def main():
                                    directory=True, writable=True))
         print("Scope: this shell's Spring environment; JVM properties and service environment are not inspected")
     else:
-        for name in ["SSA_YOLO_MODEL_PATH", "SSA_VIDEO_1_PATH", "SSA_VIDEO_2_PATH", "SSA_VIDEO_3_PATH", "SSA_SQLITE_PATH"]:
+        for name in ["SSA_YOLO_MODEL_PATH", "SSA_VIDEO_1_PATH", "SSA_VIDEO_2_PATH", "SSA_VIDEO_3_PATH"]:
             checks.append(inspect_path(name, os.getenv(name, ""), writable=name == "SSA_SQLITE_PATH"))
+        if os.getenv("SSA_FLASK_PROFILE", "ai").strip() == "local":
+            checks.append(inspect_path("SSA_SQLITE_PATH", os.getenv("SSA_SQLITE_PATH", ""), writable=True))
         print("Scope: Flask process environment > project .env")
     identity = f"uid={os.geteuid()}" if hasattr(os, "geteuid") else "current Windows process identity"
     print(f"Permission checks: {identity}; read-only access checks, no write probes")

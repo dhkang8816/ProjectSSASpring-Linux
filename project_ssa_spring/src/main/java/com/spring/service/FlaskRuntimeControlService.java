@@ -33,13 +33,14 @@ public class FlaskRuntimeControlService {
     private volatile boolean startupInitializationRequested;
 
     public Map<String, Object> status() {
-        boolean online = isFlaskOnline();
+        JsonNode health = readFlaskHealth();
+        boolean online = health != null;
         boolean enabled = RuntimeSettings.enabled("SSA_FLASK_CONTROL_ENABLED", false);
         boolean localTarget = isLocalFlaskTarget();
         boolean projectReady = isProjectReady();
         boolean tokenReady = hasControlToken();
         boolean managedProcessAlive = isManagedProcessAlive();
-        StartupState startup = resolveStartupState(online, managedProcessAlive);
+        StartupState startup = resolveStartupState(online, managedProcessAlive, health);
         if (online && startup.ready) {
             startupRequested = false;
             startupInitializationRequested = false;
@@ -47,11 +48,16 @@ public class FlaskRuntimeControlService {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("online", online);
+        result.put("processReady", online);
+        result.put("aiReady", startup.aiReady);
+        result.put("ready", startup.ready);
+        result.put("instanceId", health == null ? null : health.path("instanceId").asText(null));
+        result.put("aiError", startup.aiError);
         result.put("controlEnabled", enabled);
         result.put("managedProcess", managedProcessAlive);
         result.put("canStart", enabled && localTarget && projectReady && tokenReady && !online && !managedProcessAlive);
         result.put("canStop", enabled && localTarget && tokenReady && online);
-        result.put("startupInProgress", startupRequested && !startup.ready);
+        result.put("startupInProgress", startupRequested && !startup.ready && !startup.stage.endsWith("FAILED"));
         result.put("startupStage", startup.stage);
         result.put("startupProgress", startup.progress);
         result.put("startupLabel", startup.label);
@@ -136,16 +142,23 @@ public class FlaskRuntimeControlService {
     }
 
     private boolean isFlaskOnline() {
+        return readFlaskHealth() != null;
+    }
+
+    private JsonNode readFlaskHealth() {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) URI.create(healthUrl()).toURL().openConnection();
             connection.setRequestMethod("GET");
+            connection.setUseCaches(false);
             connection.setConnectTimeout(HEALTH_TIMEOUT_MS);
             connection.setReadTimeout(HEALTH_TIMEOUT_MS);
             int status = connection.getResponseCode();
-            return status >= 200 && status < 300;
+            if (status < 200 || status >= 300) return null;
+            JsonNode health = objectMapper.readTree(connection.getInputStream());
+            return health != null && health.isObject() ? health : null;
         } catch (Exception ignored) {
-            return false;
+            return null;
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -200,7 +213,7 @@ public class FlaskRuntimeControlService {
      * listening. During a managed start, additionally ask Flask to start its
      * optional workers and surface its own step-by-step lifecycle state.
      */
-    private StartupState resolveStartupState(boolean online, boolean managedProcessAlive) {
+    private StartupState resolveStartupState(boolean online, boolean managedProcessAlive, JsonNode health) {
         if (!online) {
             if (managedProcessAlive) {
                 return new StartupState("PROCESS_RUNNING", 55, "Python 프로세스 실행 확인", false);
@@ -211,13 +224,21 @@ public class FlaskRuntimeControlService {
             return new StartupState("IDLE", 0, "Flask 서버 대기", false);
         }
 
-        if (!startupRequested) {
-            return new StartupState("READY", 100, "Flask 상태 API 응답 확인 완료", true);
+        // Reading actual AI state must not depend on permission to start/stop it.
+        // Legacy Flask health responses expose the same cached state under ai.
+        if (!startupRequested || startupInitializationRequested) {
+            JsonNode ai = health.path("ai");
+            boolean aiReady = health.has("aiReady")
+                    ? health.path("aiReady").asBoolean(false) : ai.path("ready").asBoolean(false);
+            boolean ready = aiReady && health.path("ready").asBoolean(aiReady);
+            return new StartupState(
+                    health.path("stage").asText(ai.path("stage").asText("PROCESS_ONLINE")),
+                    health.path("progress").asInt(ai.path("progress").asInt(45)),
+                    health.path("label").asText(ai.path("label").asText("Flask 응답 확인 · AI 준비 미확인")),
+                    ready, aiReady, ai.path("error").asText(null));
         }
 
-        StartupState state = startupInitializationRequested
-                ? requestFlaskStartupState(false)
-                : requestFlaskStartupState(true);
+        StartupState state = requestFlaskStartupState(true);
         if (!startupInitializationRequested && !"SERVICE_FAILED".equals(state.stage)) {
             startupInitializationRequested = true;
         }
@@ -252,8 +273,10 @@ public class FlaskRuntimeControlService {
             String stage = payload.path("stage").asText("SERVICES_STARTING");
             int progress = payload.path("progress").asInt(70);
             String label = payload.path("label").asText("부가 서비스 시작 중");
-            boolean ready = payload.path("ready").asBoolean(false);
-            return new StartupState(stage, progress, label, ready);
+            boolean aiReady = payload.path("aiReady").asBoolean(false);
+            boolean ready = aiReady && payload.path("ready").asBoolean(false);
+            String aiError = payload.path("ai").path("error").asText(null);
+            return new StartupState(stage, progress, label, ready, aiReady, aiError);
         } catch (Exception ignored) {
             return new StartupState("SERVICE_FAILED", 0, "Flask 부가 서비스 상태 확인 실패", false);
         } finally {
@@ -268,12 +291,20 @@ public class FlaskRuntimeControlService {
         private final int progress;
         private final String label;
         private final boolean ready;
+        private final boolean aiReady;
+        private final String aiError;
 
         private StartupState(String stage, int progress, String label, boolean ready) {
+            this(stage, progress, label, ready, false, null);
+        }
+
+        private StartupState(String stage, int progress, String label, boolean ready, boolean aiReady, String aiError) {
             this.stage = stage;
             this.progress = progress;
             this.label = label;
             this.ready = ready;
+            this.aiReady = aiReady;
+            this.aiError = aiError;
         }
     }
 

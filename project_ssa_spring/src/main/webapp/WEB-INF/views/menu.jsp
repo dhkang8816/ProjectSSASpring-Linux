@@ -883,11 +883,15 @@ button#sidebarFlaskToggleButton:disabled {
 			return;
 		}
 		var online = !!(state && state.online);
+		var aiReady = !!(state && state.aiReady);
 		var action = online ? 'stop' : 'start';
-		flaskToggleButton.className = 'sidebar-flask-toggle ' + (online ? 'is-online' : 'is-offline');
-		setFlaskButtonContent(online ? '● Flask ON' : '● Flask OFF', 0);
+		flaskToggleButton.className = 'sidebar-flask-toggle ' + (online ? (aiReady ? 'is-online' : 'is-error') : 'is-offline');
+		setFlaskButtonContent(online ? (aiReady ? '● Flask ON · AI 준비' : '● Flask ON · AI 미준비') : '● Flask OFF', 0);
 		flaskToggleButton.dataset.action = action;
 		flaskToggleButton.title = online ? '클릭하여 Flask 서버 종료' : '클릭하여 Flask 서버 시작';
+		if (online && !aiReady) {
+			flaskToggleButton.title = (state.aiError || state.startupLabel || 'AI 준비 미확인') + ' · 클릭하여 Flask 서버 종료';
+		}
 		flaskToggleButton.setAttribute('aria-label', flaskToggleButton.title);
 		flaskToggleButton.disabled = flaskActionInProgress
 			|| !(state && (online ? state.canStop : state.canStart));
@@ -913,6 +917,7 @@ button#sidebarFlaskToggleButton:disabled {
 
 	function requestFlaskRuntime() {
 		return fetch(contextPath + '/admin/diagnostics/flask', {
+            cache: 'no-store',
 			headers: { 'Accept': 'application/json' }
 		}).then(function (response) {
 			if (!response.ok) {
@@ -946,6 +951,7 @@ button#sidebarFlaskToggleButton:disabled {
 			}
 			if (state.startupStage === 'START_FAILED'
 				|| state.startupStage === 'SERVICE_FAILED'
+				|| state.startupStage === 'AI_FAILED'
 				|| Date.now() >= deadline) {
 				flaskActionInProgress = false;
 				renderFlaskRuntime(state);

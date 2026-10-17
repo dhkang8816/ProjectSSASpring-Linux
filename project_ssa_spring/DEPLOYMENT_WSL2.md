@@ -1,5 +1,16 @@
 # WSL2 · Tomcat 10 · Java 17 배포 메모
 
+## 후속 GPU 실행 제어 변경 (운영 미반영)
+
+Flask 프로세스 응답(`processReady`)과 커스텀 YOLO CUDA 추론 준비(`aiReady`)를 구분한다.
+현재 `FlaskRuntimeControlService`는 토큰으로 보호된 Flask startup-status를 확인하며,
+JSP 버튼도 AI 미준비/준비를 별도 표시한다. HTTP 200만으로 AI 준비를 선언하지 않는다.
+
+개발 계정에서 실제 `.venv` Flask 실행 → CUDA 연산/커스텀 모델 추론 → 중복 시작 차단 → 정상
+종료를 검증했다. 운영 Tomcat 재배포·재시작은 하지 않았다. `tomcat`의 개발자 홈 검색 권한,
+홈 아래 Python 인터프리터 접근, 서비스의 쓰기 제한과 실제 GPU 접근은 승인 후 별도 검증해야 한다.
+설치 명령·고정 버전·실제 결과·격리 재검증 도구는 [GPU 안내](../project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md)에 있다.
+
 ## 후속 경로 설정 변경 (未배포)
 
 전체 [경로 점검](../PATH_CONFIGURATION_LINUX.md) 이후 코드는 Linux의
@@ -156,3 +167,12 @@ sudo bash scripts/deploy-tomcat-java17.sh --apply
 - 새 배포 이후 localhost/catalina 로그에 `UnsupportedClassVersionError`가 없음을 확인했다.
   `WEB-INF`의 JDBC 직접 요청은 404였으며 WAR의 공개 경로에는 JDBC 파일이 없다.
 - DB 계정·접속 URL·Windows 네트워크·방화벽은 이번 수정에서 변경하지 않았다.
+
+
+## Flask SQLite 서비스 경로 적용 기록
+
+Flask가 `SSA_SQLITE_PATH must be configured`로 종료되고 이후 개발 계정 소유 DB의 읽기 권한 검사에서도 종료된 문제가 있었다. 사용자 승인으로 기존 `project_ssa_yolo/local.sqlite` 원본을 보존하고 `/var/lib/project-ssa/flask/local.sqlite`로 SQLite backup API 복사를 적용했다. 실제 `.env`에서 SQLite/모델 경로 두 키만 설정하는 예외와 이후 SQLite 전용 경로 갱신을 각각 승인받았다. 토큰·webhook·JDBC 값은 변경하지 않았다.
+
+`/etc/systemd/system/tomcat10.service.d/ssa-flask-sqlite.conf`는 새 SQLite 부모 디렉터리의 ReadWritePaths만 추가한다. 전용 디렉터리는 tomcat:ssa-upload 2770, DB는 tomcat:ssa-upload 0660이다. 소스 디렉터리에 Tomcat 쓰기 권한을 추가하지 않았다. `scripts/prepare-flask-sqlite-linux.py`는 기본 읽기 전용이고 --apply는 별도 승인·root 인증이 필요하다. --resume은 기존 복사본의 무결성 및 원본과 스키마/데이터 동일성을 검사하고 기존 DB를 덮어쓰지 않는다. 이미 적용된 설정을 무조건 재실행하는 도구가 아니다.
+
+실제 서비스의 Flask ON·AI 준비와 cuda:0, 세 상태 API HTTP 200을 확인했다. 운영 탐지 이벤트/Discord 실전송은 사용자 요청으로 보류했다. 구체적인 원인, 승인·적용 기록과 검증 범위는 [GPU 환경·운영 진단 기록](../project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md)을 참고한다.

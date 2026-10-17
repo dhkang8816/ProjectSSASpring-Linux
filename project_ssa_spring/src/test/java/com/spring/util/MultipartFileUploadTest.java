@@ -24,6 +24,26 @@ class MultipartFileUploadTest {
     Path temporaryDirectory;
 
     @Test
+    void normalizesRenamedSpoolPermissionsToTheDestinationDirectoryGroup() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.getFileStore(temporaryDirectory).supportsFileAttributeView("posix"));
+        MockMultipartFile image = new MockMultipartFile("pictureFile", "probe.png", "image/png", new byte[] {1}) {
+            @Override
+            public void transferTo(File destination) throws IOException {
+                Path spool = Files.createTempFile(temporaryDirectory, "spool-", ".tmp");
+                Files.write(spool, getBytes());
+                Files.setPosixFilePermissions(spool, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+                Files.move(spool, destination.toPath());
+            }
+        };
+        String name = MultipartFileUpload.saveImageFile(temporaryDirectory.toString(), image);
+        assertEquals("rw-rw----", java.nio.file.attribute.PosixFilePermissions.toString(
+                Files.getPosixFilePermissions(temporaryDirectory.resolve(name))));
+        assertEquals(Files.readAttributes(temporaryDirectory, java.nio.file.attribute.PosixFileAttributes.class).group(),
+                Files.readAttributes(temporaryDirectory.resolve(name), java.nio.file.attribute.PosixFileAttributes.class).group());
+    }
+
+    @Test
     void savesAllowedImageWithServerGeneratedFileName() throws Exception {
         byte[] imageBytes = { 1, 2, 3 };
         MockMultipartFile image = new MockMultipartFile(

@@ -5,6 +5,7 @@ import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,7 +42,7 @@ public class SystemDiagnosticsController {
     @GetMapping(value = "/flask", produces = "application/json; charset=UTF-8")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> flaskRuntimeStatus() {
-        return ResponseEntity.ok(flaskRuntimeControlService.status());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(flaskRuntimeControlService.status());
     }
 
     @PostMapping(value = "/flask/start", produces = "application/json; charset=UTF-8")

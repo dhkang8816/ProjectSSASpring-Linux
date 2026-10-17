@@ -36,7 +36,7 @@ def _bool(name, default=False):
     return value in {"1", "true", "yes", "on"}
 
 
-SPRING_HOST = _text("SSA_SPRING_HOST", "http://localhost:8080/project_ssa_spring-0.0.1-SNAPSHOT/")
+SPRING_HOST = _text("SSA_SPRING_HOST", "http://localhost:8080/project_ssa_spring-0.0.1-SNAPSHOT").rstrip("/")
 ESP32_STREAM_URL = _text("SSA_ESP32_STREAM_URL", "http://192.168.0.100:80/stream")
 ESP32_COM_PORT = _text("SSA_ESP32_COM_PORT", "COM6" if os.name == "nt" else "")
 
@@ -73,6 +73,8 @@ BUZZER_SHUTDOWN_SOUND_WAIT_SECONDS = _float(
     "SSA_BUZZER_SHUTDOWN_SOUND_WAIT_SECONDS", 5.0, minimum=0.1
 )
 YOLO_MODEL_PATH = _text("SSA_YOLO_MODEL_PATH", "")
+YOLO_DEVICE = _text("SSA_YOLO_DEVICE", "cuda:0")
+OPTIONAL_IO_ENABLED = _bool("SSA_OPTIONAL_IO_ENABLED", True)
 VIDEO_PATHS = {
     "video_1": _text("SSA_VIDEO_1_PATH", ""),
     "video_2": _text("SSA_VIDEO_2_PATH", ""),

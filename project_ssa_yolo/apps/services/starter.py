@@ -54,6 +54,9 @@ def start_services():
     """Initialize optional workers and queue at most one process startup tone."""
 
     global _startup_sound_played
+    if not runtime_settings.OPTIONAL_IO_ENABLED:
+        _set_startup_status("READY", 100, "장치·알림 worker 비활성화", True)
+        return
     _set_startup_status("SERVICES_STARTING", 70, "부가 서비스 시작 중", False)
     print("[starter] services starting")
     start_buzzer_service()

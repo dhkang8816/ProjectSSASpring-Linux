@@ -8,6 +8,7 @@ from queue import Empty, Full, Queue
 
 import requests
 from apps.environment import load_project_environment
+from apps import runtime_settings
 
 
 load_project_environment()
@@ -16,6 +17,19 @@ _notification_queue = Queue(maxsize=100)
 _notification_start_lock = threading.Lock()
 _notification_worker = None
 _notification_shutdown_event = threading.Event()
+_notification_status_lock = threading.Lock()
+_notification_results = {"sentCount": 0, "failedCount": 0, "lastError": None}
+
+
+def _safe_failure(error):
+    """requests exceptions can contain the secret webhook URL; never stringify them."""
+    response = getattr(error, "response", None)
+    code = getattr(response, "status_code", None)
+    detail = f"{type(error).__name__}" + (f" HTTP {code}" if code is not None else "")
+    with _notification_status_lock:
+        _notification_results["lastError"] = detail
+    return detail
+
 
 
 def _webhook_url():
@@ -53,7 +67,7 @@ def send_discord_webhook(message, image_path=None):
             print("[discord] notification sent")
             return True
         except requests.RequestException as error:
-            print(f"[discord] notification failed: {error}")
+            print(f"[discord] notification failed: {_safe_failure(error)}")
             return False
 
     try:
@@ -77,13 +91,13 @@ def send_discord_webhook(message, image_path=None):
         return True
     except (OSError, requests.RequestException) as error:
         # A file/read error must not discard the event's text notification.
-        print(f"[discord] snapshot upload failed; sending text-only notification: {error}")
+        print(f"[discord] snapshot upload failed; sending text-only notification: {_safe_failure(error)}")
         try:
             _send_text_payload(webhook_url, payload)
             print("[discord] text-only fallback sent")
             return True
         except requests.RequestException as fallback_error:
-            print(f"[discord] notification failed: {fallback_error}")
+            print(f"[discord] notification failed: {_safe_failure(fallback_error)}")
             return False
 
 
@@ -116,10 +130,18 @@ def _notification_loop():
         except Empty:
             continue
         try:
-            send_discord_alert(event["message"], image_path=event.get("image_path"))
+            sent = send_discord_alert(event["message"], image_path=event.get("image_path"))
+            with _notification_status_lock:
+                _notification_results["sentCount" if sent else "failedCount"] += 1
+                if sent:
+                    _notification_results["lastError"] = None
+                elif not _notification_results["lastError"]:
+                    _notification_results["lastError"] = "Webhook not configured or delivery failed"
         except Exception as error:
             # Discord is optional: worker failures must never stop detection.
-            print(f"[discord] notification worker error: {error}")
+            print(f"[discord] notification worker error: {_safe_failure(error)}")
+            with _notification_status_lock:
+                _notification_results["failedCount"] += 1
         finally:
             _notification_queue.task_done()
 
@@ -159,8 +181,11 @@ def stop_notification_service(join_timeout=2.0):
 def get_notification_status():
     """Return configuration and queue state without exposing a webhook URL."""
     worker = _notification_worker
-    return {
-        "configured": bool(_webhook_url()),
-        "workerRunning": worker is not None and worker.is_alive(),
-        "queueDepth": _notification_queue.qsize(),
-    }
+    with _notification_status_lock:
+        return {
+            **_notification_results,
+            "enabled": runtime_settings.OPTIONAL_IO_ENABLED,
+            "configured": bool(_webhook_url()),
+            "workerRunning": worker is not None and worker.is_alive(),
+            "queueDepth": _notification_queue.qsize(),
+        }

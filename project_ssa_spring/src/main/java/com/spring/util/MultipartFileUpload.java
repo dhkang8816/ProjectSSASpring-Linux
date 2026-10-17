@@ -5,6 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -85,6 +89,18 @@ public class MultipartFileUpload {
 		}
 		try {
 			multi.transferTo(destination.toFile());
+			// Tomcat may rename a spooled inode: setgid/default ACL does not
+			// reapply on rename. Normalize only this newly uploaded file.
+			PosixFileAttributeView view = Files.getFileAttributeView(destination,
+					PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+			if (view != null) {
+				PosixFileAttributes parent = Files.readAttributes(directory,
+						PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+				view.setGroup(parent.group());
+				view.setPermissions(EnumSet.of(PosixFilePermission.OWNER_READ,
+						PosixFilePermission.OWNER_WRITE, PosixFilePermission.GROUP_READ,
+						PosixFilePermission.GROUP_WRITE));
+			}
 		} catch (IOException | RuntimeException ex) {
 			try {
 				Files.deleteIfExists(destination);

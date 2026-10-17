@@ -46,6 +46,16 @@ class StarterTest(unittest.TestCase):
 
         self.assertEqual(["notification", "sensor", ("shutdown", 3.0), "buzzer"], calls)
 
+    def test_optional_io_disabled_does_not_start_discord_or_devices(self):
+        with patch.object(starter.runtime_settings, "OPTIONAL_IO_ENABLED", False), \
+                patch.object(starter, "start_notification_service") as discord, \
+                patch.object(starter, "start_sensor_service") as sensor, \
+                patch.object(starter, "start_buzzer_service") as buzzer:
+            starter.start_services()
+        discord.assert_not_called()
+        sensor.assert_not_called()
+        buzzer.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

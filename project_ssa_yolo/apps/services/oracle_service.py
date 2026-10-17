@@ -24,6 +24,26 @@ FALLBACK_TARGET_COUNTS = {"0": 2, "1": 1}
 FALLBACK_CODE_MAP = {"0": "개", "1": "고양이"}
 CURRENT_ACTIVE_SOURCE = "video_1" 
 _report_queue = Queue(maxsize=100)
+_report_status_lock = threading.Lock()
+_report_status = {"deliveredCount": 0, "failedCount": 0, "lastError": None}
+
+
+def get_report_status():
+    """Cached callback diagnostics, without URLs, payloads or credentials."""
+    with _report_status_lock:
+        return {**_report_status, "queueDepth": _report_queue.qsize(),
+                "workerRunning": _report_thread.is_alive()}
+
+
+def _spring_report_succeeded(response):
+    # A login redirect may end as HTTP 200 HTML; that is not a persisted event.
+    if response.status_code != 200:
+        return False
+    try:
+        return response.json().get("status") == "SUCCESS"
+    except (ValueError, AttributeError):
+        return False
+
 
 # 🌟 [신규 개설] 실시간 프레임을 로컬 하드디스크에 직접 저장하는 고속 엔진 함수
 def _save_physical_snapshot(frame, folder_name):
@@ -112,18 +132,26 @@ def get_active_drone_id(source_key=None):
             print(f"❌ [매핑 서버 응답 에러] HTTP 상태 코드: {map_response.status_code}")
             
     except Exception as e:
-        print(f"⚠ [매핑 통신 폭발/지연] 기본 DRONE01 대체 가동. 에러 원인: {e}")
+        print(f"[Spring mapping fallback] {type(e).__name__}")
         
     return active_drone_id
 
 
+def _report_snapshot(frame, folder_name, notification, drone_id, source_key):
+    """Keep storage failure visible while allowing the existing text-only alert."""
+    try:
+        saved_name = _save_physical_snapshot(frame, folder_name)
+        return saved_name, _local_snapshot_path(folder_name, saved_name)
+    except (OSError, runtime_settings.RuntimePathError):
+        _enqueue_detection_discord_alert(notification, None, drone_id, source_key)
+        raise
+
+
 def _send_log_to_oracle(animal_type, detect_count, reason, frame, source_key, notification=None):
     url = API_REPORT
-    saved_file_name = _save_physical_snapshot(frame, "detection")
-    image_path = _local_snapshot_path("detection", saved_file_name)
-    
-    # 💡 분리한 공통 함수 호출로 동적 ID 획득
     active_drone_id = get_active_drone_id(source_key)
+    saved_file_name, image_path = _report_snapshot(
+        frame, "detection", notification, active_drone_id, source_key)
     
     payload = {
         "animalType": str(animal_type),
@@ -161,12 +189,15 @@ def _send_log_to_oracle(animal_type, detect_count, reason, frame, source_key, no
             timeout=runtime_settings.EVENT_REQUEST_TIMEOUT_SECONDS,
         )
         
-        if response.status_code == 200:
+        if _spring_report_succeeded(response):
             print("✅ [오라클 통신 서비스] 정상 축종 미달 로그 스프링 전송 및 오라클 적재 최종 성공!")
+            return True
         else:
-            print(f"❌ [오라클 통신 서비스] 스프링 응답 에러 (코드: {response.status_code}, 내용: {response.text})")
+            print(f"[Spring report rejected] HTTP {response.status_code}; SUCCESS JSON required")
+            return False
     except Exception as e:
-        print(f"⚠[오라클 통신 서비스] 스프링 허브 연결 물리적 실패. 에러: {e}")
+        print(f"[Spring report error] {type(e).__name__}")
+        return False
 
     finally:
         _enqueue_detection_discord_alert(notification, image_path, active_drone_id, source_key)
@@ -179,10 +210,9 @@ def _send_danger_log_to_oracle(danger_type, frame, source_key, notification=None
     """
 
     # 🌟 인서트 가동 직전 물리 캡처 실행 및 파일명 추출
-    saved_file_name = _save_physical_snapshot(frame, "dangerlog")
-    image_path = _local_snapshot_path("dangerlog", saved_file_name)
-
     active_drone_id = get_active_drone_id(source_key)
+    saved_file_name, image_path = _report_snapshot(
+        frame, "dangerlog", notification, active_drone_id, source_key)
     drone_id = active_drone_id
     payload = {
         "dangerType": int(danger_type),    # 외계인(2), 상어(3), 용(4), 호랑이(5)
@@ -203,14 +233,14 @@ def _send_danger_log_to_oracle(danger_type, frame, source_key, notification=None
             headers=headers,
             timeout=runtime_settings.EVENT_REQUEST_TIMEOUT_SECONDS,
         )
-        if response.status_code == 200:
+        if _spring_report_succeeded(response):
             print(f"🚀 [오라클 통신 서비스] 위험 이상객체 실시간 로그 스프링 적재 성공 완료!")
             return True
         else:
             print(f"❌ [오라클 통신 서비스] 위험 객체 스프링 응답 에러 (코드: {response.status_code})")
             return False
     except Exception as e:
-        print(f"❌ [오라클 통신 서비스] 위험 객체 원격 전송 중 네트워크 예외 폭발: {e}")
+        print(f"[Spring danger report error] {type(e).__name__}")
         return False
 
 
@@ -223,14 +253,22 @@ def _report_worker():
     """Run blocking snapshot and Spring HTTP work outside the YOLO loop."""
     while True:
         report_type, payload = _report_queue.get()
+        error = None
+        delivered = False
         try:
             if report_type == "normal":
-                _send_log_to_oracle(**payload)
+                delivered = _send_log_to_oracle(**payload)
             elif report_type == "danger":
-                _send_danger_log_to_oracle(**payload)
+                delivered = _send_danger_log_to_oracle(**payload)
+            if not delivered:
+                error = "Spring callback rejected or unavailable; inspect Spring logs"
         except Exception as e:
-            print(f"[Spring report worker error] {e}")
+            error = type(e).__name__
+            print(f"[Spring report worker error] {error}; check SSA_UPLOAD_ROOT and callback configuration")
         finally:
+            with _report_status_lock:
+                _report_status["deliveredCount" if delivered else "failedCount"] += 1
+                _report_status["lastError"] = error
             _report_queue.task_done()
 
 
@@ -265,7 +303,8 @@ def send_danger_log_to_oracle(danger_type, frame, source_key=None, drone_id=None
     })
 
 
-threading.Thread(target=_report_worker, name="spring-report-worker", daemon=True).start()
+_report_thread = threading.Thread(target=_report_worker, name="spring-report-worker", daemon=True)
+_report_thread.start()
 
 
 def _fetch_metadata(url, fallback, value_normalizer):
@@ -278,7 +317,7 @@ def _fetch_metadata(url, fallback, value_normalizer):
             raise ValueError("metadata response must be a non-empty JSON object")
         return {str(key): value_normalizer(value) for key, value in metadata.items()}
     except (requests.RequestException, TypeError, ValueError) as error:
-        print(f"[AI metadata fallback] {error}")
+        print(f"[AI metadata fallback] {type(error).__name__}")
         return fallback.copy()
 
 

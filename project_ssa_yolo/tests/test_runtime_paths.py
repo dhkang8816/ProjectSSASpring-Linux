@@ -2,6 +2,8 @@
 
 import ast
 import os
+import sqlite3
+import importlib.util
 import tempfile
 import threading
 import unittest
@@ -143,6 +145,57 @@ class RuntimePathTest(unittest.TestCase):
     def test_windows_serial_configuration_remains_supported(self):
         with patch.object(runtime_settings.os, "name", "nt"):
             self.assertEqual("COM77", runtime_settings.validate_serial_port("COM77"))
+
+
+class RuntimeSqlitePreparationTest(unittest.TestCase):
+    def test_retained_copy_is_reused_only_if_schema_and_data_match(self):
+        path = runtime_settings.REPOSITORY_ROOT / "project_ssa_spring/scripts/prepare-flask-sqlite-linux.py"
+        spec = importlib.util.spec_from_file_location("ssa_sqlite_preparation", path)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.sqlite"
+            destination = Path(directory) / "retained.sqlite"
+            connection = sqlite3.connect(source)
+            connection.execute("CREATE TABLE sample(value TEXT)")
+            connection.execute("INSERT INTO sample VALUES ('original')")
+            connection.commit()
+            copied = sqlite3.connect(destination)
+            connection.backup(copied)
+            copied.close()
+            connection.close()
+            helper.validate_retained_copy(source, destination)
+            connection = sqlite3.connect(destination)
+            connection.execute("UPDATE sample SET value='changed'")
+            connection.commit()
+            connection.close()
+            previous = destination.read_bytes()
+            with self.assertRaises(SystemExit):
+                helper.validate_retained_copy(source, destination)
+            self.assertEqual(previous, destination.read_bytes())
+
+
+class ServicePermissionProbeTest(unittest.TestCase):
+    def test_write_probe_removes_only_its_own_temporary_file(self):
+        helper_path = runtime_settings.REPOSITORY_ROOT / "project_ssa_spring/scripts/linux-runtime-permissions.py"
+        spec = importlib.util.spec_from_file_location("ssa_permission_audit", helper_path)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        with tempfile.TemporaryDirectory() as directory:
+            existing = Path(directory) / "existing-user-image.png"
+            existing.write_bytes(b"preserved user data")
+            payload = {"identity": {"uid": 1, "gid": 1, "groups": []}, "umask": "0007",
+                       "paths": [{"name": "upload", "path": directory, "directory": True, "writable": True}],
+                       "verify": True, "full": False}
+            previous_umask = os.umask(0o007)
+            try:
+                with patch.object(helper.os, "setgroups"), patch.object(helper.os, "setgid"), patch.object(helper.os, "setuid"):
+                    result = helper.access_probe(payload)
+            finally:
+                os.umask(previous_umask)
+            self.assertTrue(result["paths"][0]["write_probe"]["readback"])
+            self.assertEqual([existing], list(Path(directory).iterdir()))
+            self.assertEqual(b"preserved user data", existing.read_bytes())
 
 
 class SnapshotPathTest(unittest.TestCase):

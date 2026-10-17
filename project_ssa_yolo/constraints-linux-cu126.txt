@@ -1,0 +1,9 @@
+# Linux/WSL2 compatibility baseline. Install the matching torch wheels from
+# https://download.pytorch.org/whl/cu126 before requirements.txt.
+# Ultralytics matches the version recorded in the user-confirmed checkpoint.
+torch==2.7.1+cu126
+torchvision==0.22.1+cu126
+ultralytics==8.4.54
+numpy==2.2.6
+opencv-python==4.13.0.92
+pytest==8.4.2

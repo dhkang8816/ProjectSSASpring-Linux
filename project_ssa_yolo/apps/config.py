@@ -20,8 +20,14 @@ def _secret(name, fallback=None):
 
 # BaseConfig 클래스를 작성한다
 class BaseConfig:
+    LOCAL_DATABASE_ENABLED = True
     SECRET_KEY = _secret("SSA_FLASK_SECRET_KEY")
     WTF_CSRF_SECRET_KEY = _secret("SSA_FLASK_CSRF_SECRET_KEY", SECRET_KEY)
+
+
+class AiConfig(BaseConfig):
+    """Spring-facing inference server: no local DB engine or legacy UI."""
+    LOCAL_DATABASE_ENABLED = False
 
 
 # BaseConfig 클래스를 상속하여 LocalConfig 클래스를 작성한다
@@ -47,6 +53,7 @@ class TestingConfig(BaseConfig):
     
 # config 사전에 매핑한다
 config = {
+    "ai": AiConfig,
     "testing": TestingConfig,
     "local": LocalConfig,
 }

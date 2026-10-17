@@ -9,7 +9,7 @@ import time
 
 import cv2
 import numpy as np
-from flask import Blueprint, Response, jsonify, render_template, stream_with_context
+from flask import Blueprint, Response, current_app, jsonify, render_template, stream_with_context
 
 from apps.services import oracle_service, yolo_detector
 
@@ -30,6 +30,8 @@ has_resetted = False
 
 @esp32_yolov12.route("/")
 def index():
+    if not current_app.config.get("LOCAL_DATABASE_ENABLED", True):
+        return jsonify({"profile": "ai", "health": "/stream/health"})
     oracle_service.fetch_target_counts()
     total_animal_count = sum(yolo_detector.TARGET_ANIMALS.values())
     return render_template(

@@ -1,6 +1,6 @@
 # 업로드 저장소 운영 안내
 
-Linux 업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`다. 운영 디렉터리 생성, 데이터 이동, 서비스 설정 변경·재시작은 수행하지 않았다. 전체 사용처는 [경로 점검](../PATH_CONFIGURATION_LINUX.md)을 참고한다.
+Linux 업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`다. 사용자 승인으로 전용 디렉터리와 권한·서비스 설정을 적용했다. 현재 상태와 검사 명령은 [Linux 실행 권한 안내](../LINUX_RUNTIME_PERMISSIONS.md), 전체 사용처는 [경로 점검](../PATH_CONFIGURATION_LINUX.md)을 참고한다.
 
 ## 경로와 호환성
 
@@ -19,7 +19,7 @@ Linux 업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본�
 
 PDF 캐시는 `SSA_CACHE_ROOT`로 별도 설정한다. 기존 업로드 아래 PDF나 DB의 과거 절대경로를 이동·삭제하지 않으며 새 캐시 루트 밖의 과거 PDF는 요청 시 재생성 대상이 된다.
 
-현재 Ubuntu 패키지 서비스는 `tomcat:tomcat`, `PrivateTmp=yes`, `ProtectSystem=strict`이다. 서비스의 기존 `ReadWritePaths` 예외가 제한되어 있으므로 외부 저장소는 디렉터리 권한 외에 systemd 쓰기 허용 설정도 운영자가 검토해야 한다. 이 문서는 실제 경로가 정해지기 전 생성·권한 변경 명령을 제안하지 않는다.
+현재 서비스는 `tomcat:tomcat`, 보조 그룹 `ssa-upload`, `UMask=0007`, `PrivateTmp=yes`, `ProtectSystem=strict`이다. 업로드·캐시 두 루트만 `ReadWritePaths`에 추가했다. 업로드 루트의 기존 `root:ssa-upload` 소유권을 유지하고 하위 저장 폴더는 `tomcat:ssa-upload`, setgid 2770 및 기본 ACL로 공유 권한을 유지한다. Java multipart는 임시 spool 파일을 rename할 수 있으므로 `MultipartFileUpload`가 새 파일에 디렉터리 그룹과 0660을 명시한다. 기존 파일에 재귀 chmod/chown은 하지 않는다.
 
 기존 이미지가 다른 위치에 있으면 파일명·대소문자·한글·공백을 유지하는 보존 복사를 별도 계획한다. 원본·대상에 같은 이름의 파일이 있으면 먼저 비교하며 삭제·덮어쓰기·자동 이전을 하지 않는다. PDF DB에 기록된 과거 절대경로는 새 루트와 다를 수 있으므로 캐시 재생성 동작도 확인한다.
 
@@ -34,4 +34,4 @@ mvn test
 mvn verify
 ```
 
-실제 저장소가 정해지고 별도 운영 반영이 승인되면 직원·동물 사진 업로드/교체/조회, 탐지·위험 스냅샷, 기본 이미지, PDF, 재시작 후 조회를 검증한다. 실제 Windows 실행과 운영 Tomcat/Oracle/장비 연동은 단위 테스트 결과와 구분한다.
+현재 실제 `tomcat` 계정 및 서비스 mount namespace에서 배포된 업로드 helper로 임시 PNG 저장·재조회·0660/그룹·임시 파일 삭제를 검증했다. Oracle SELECT 결과 회원·동물 사진 참조 각 1건의 실제 파일이 저장소에 없다. 자동 복구·DB 수정은 하지 않았다. 인증된 회원 화면에서의 HTTP 업로드 및 DB 갱신, 실제 PDF 브라우저 렌더링, 탐지 스냅샷 운영 이벤트는 별도 검증 대상이다.

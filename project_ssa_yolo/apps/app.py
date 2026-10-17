@@ -5,12 +5,10 @@ import os
 import threading
 from pathlib import Path
 from flask import Flask, jsonify
-from flask_migrate import Migrate
 from flask_login import LoginManager
 from flask import session, redirect, url_for, flash, request
 from flask_wtf.csrf import CSRFProtect
 from apps.config import config
-from apps.extensions import db
 
 # =================================================================
 # 🛠️ [관제 허브 로그 폭발 완치] 3초마다 들어오는 labels_feed 로그만 콘솔에서 숨기기
@@ -46,9 +44,10 @@ def create_app(config_key):
     app = Flask(__name__)
     selected_config = config[config_key]
     app.config.from_object(selected_config)
-    # Validate only the selected store before SQLAlchemy initializes; unrelated
-    # testing/production paths must not prevent each other from starting.
-    app.config["SQLALCHEMY_DATABASE_URI"] = selected_config.database_uri()
+    local_database_enabled = app.config["LOCAL_DATABASE_ENABLED"]
+    if local_database_enabled:
+        # Only the explicitly selected legacy/test UI needs a local database.
+        app.config["SQLALCHEMY_DATABASE_URI"] = selected_config.database_uri()
 
     # Werkzeug's debug reloader creates a parent and a serving child process.
     # Defer USB workers until a real request, which only the serving process
@@ -68,17 +67,27 @@ def create_app(config_key):
 
     def startup_status_payload():
         from apps.services.starter import get_startup_status
+        from apps.services.yolo_detector import get_ai_runtime_status
         payload = get_startup_status()
+        ai = get_ai_runtime_status()
+        ready = services_started and ai["ready"]
+        if not ai["ready"] or (not ready and payload["stage"] != "SERVICE_FAILED"):
+            payload.update(stage=ai["stage"], progress=ai["progress"], label=ai["label"])
+        payload.update(ready=ready, processReady=True, aiReady=ai["ready"], ai=ai)
         payload.update({
             "servicesStarted": services_started,
             "servicesInitializing": services_initializing,
         })
         return payload
 
+    # The read-only health route and protected startup route share one snapshot.
+    app.extensions["ssa_runtime_status"] = startup_status_payload
+
     def start_services_async():
         nonlocal services_initializing
         with services_start_lock:
-            if services_started or services_initializing:
+            from apps.services.yolo_detector import get_ai_runtime_status
+            if services_initializing or (services_started and get_ai_runtime_status()["ready"]):
                 return False
             services_initializing = True
 
@@ -88,11 +97,12 @@ def create_app(config_key):
         def initialize():
             nonlocal services_initializing
             try:
+                from apps.services.yolo_detector import initialize_ai_runtime
+                initialize_ai_runtime()
                 ensure_services_started()
             except Exception:
                 from apps.services.starter import mark_startup_failed
                 mark_startup_failed()
-                raise
             finally:
                 with services_start_lock:
                     services_initializing = False
@@ -106,37 +116,41 @@ def create_app(config_key):
         # In particular, the first /stream/health request must not start the
         # sensor poller (and therefore must not open COM6) merely to report it.
         if request.endpoint in {
+            "runtime_index",
             "stream.health_status",
             "stream.shutdown_runtime",
             "runtime_startup_status",
             "runtime_initialize_services",
         }:
             return
+        if not local_database_enabled and request.endpoint in {"stream.index", "esp32_yolov12.index"}:
+            return
         ensure_services_started()
     
     csrf.init_app(app)
-    db.init_app(app)
-    Migrate(app, db)
-    
-    from apps.db_test import project_db
-    login_manager.init_app(app)
-    
-    # crud 패키지로부터 views를 import한다
-    from apps.crud import views as crud_views
-    app.register_blueprint(crud_views.crud, url_prefix="/crud")
-    
-    from apps.auth import views as auth_views
-    app.register_blueprint(auth_views.auth, url_prefix="/auth")
-    
-    from apps.main import views as main_views
-    app.register_blueprint(main_views.main)
-    
-    from apps.detect_data import views as dd_views
-    app.register_blueprint(dd_views.dd, url_prefix="/detect")
-    
-    from apps.control_page import views as control_views
-    app.register_blueprint(control_views.control_page, url_prefix="/control")
-    
+    if local_database_enabled:
+        from flask_migrate import Migrate
+        from apps.extensions import db
+        db.init_app(app)
+        Migrate(app, db)
+        from apps.db_test import project_db
+        login_manager.init_app(app)
+
+        from apps.crud import views as crud_views
+        app.register_blueprint(crud_views.crud, url_prefix="/crud")
+        from apps.auth import views as auth_views
+        app.register_blueprint(auth_views.auth, url_prefix="/auth")
+        from apps.main import views as main_views
+        app.register_blueprint(main_views.main)
+        from apps.detect_data import views as dd_views
+        app.register_blueprint(dd_views.dd, url_prefix="/detect")
+        from apps.control_page import views as control_views
+        app.register_blueprint(control_views.control_page, url_prefix="/control")
+    else:
+        @app.get("/")
+        def runtime_index():
+            return jsonify({"profile": "ai", "health": "/stream/health"})
+
     from apps.stream import views as stream_views
     app.register_blueprint(stream_views.stream, url_prefix="/stream")
     
@@ -165,6 +179,8 @@ def create_app(config_key):
     
     @app.before_request
     def check_access_control():
+        if not local_database_enabled:
+            return
         if request.blueprint in ['auth', 'main', 'esp32_yolov12', 'stream']:
             return
         

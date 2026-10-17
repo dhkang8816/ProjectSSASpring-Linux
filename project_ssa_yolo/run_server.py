@@ -23,7 +23,7 @@ def _port():
         return 5000
 
 
-app = create_app("local")
+app = create_app(os.getenv("SSA_FLASK_PROFILE", "ai").strip())
 
 
 if __name__ == "__main__":
@@ -40,3 +40,5 @@ if __name__ == "__main__":
         server.serve_forever()
     finally:
         server.server_close()
+        from apps.services.yolo_detector import shutdown_ai_runtime
+        shutdown_ai_runtime()

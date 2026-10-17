@@ -21,6 +21,8 @@ stream = Blueprint(
 
 @stream.route("/")
 def index():
+    if not current_app.config.get("LOCAL_DATABASE_ENABLED", True):
+        return jsonify({"profile": "ai", "health": "/stream/health"})
     return render_template("index.html")
 
 
@@ -126,12 +128,17 @@ def health_status():
     This endpoint deliberately reads existing in-memory state only. It never
     starts a YOLO worker, runs inference, invokes mpremote, or sends Discord.
     """
-    return jsonify({
+    response = jsonify({
         **_status_payload(),
+        **current_app.extensions["ssa_runtime_status"](),
+        "instanceId": str(os.getpid()),
+        "reports": yolo_detector.oracle_service.get_report_status(),
         "sensor": sensor_helper.get_sensor_service_status(),
         "buzzer": buzzer_helper.get_buzzer_status(),
         "discord": notifier.get_notification_status(),
     })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @stream.route("/admin/shutdown", methods=["POST"])

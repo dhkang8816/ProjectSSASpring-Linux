@@ -7,17 +7,22 @@ and loading the same weights once per source would multiply CPU/GPU memory.
 """
 
 import atexit
+import gc
 import threading
 import time
 from datetime import datetime
 
+from apps import runtime_settings
+
 import cv2
+import numpy as np
+import torch
 from ultralytics import YOLO
 
-from apps import runtime_settings
 from apps.services.esp32_mjpeg import Esp32MjpegCapture
 from apps.services import oracle_service
 from apps.services.buzzer_helper import trigger_animal_sound, trigger_danger_sound
+from apps.services.inference_device import resolve_device
 
 
 YOLO_TO_CODE = {
@@ -48,7 +53,11 @@ current_source_path = runtime_settings.VIDEO_PATHS["video_1"]
 source_changed = False
 
 _model = None
+_model_device = None
 _model_inference_lock = threading.RLock()
+_ai_status_lock = threading.RLock()
+_ai_status = {"stage": "AI_IDLE", "progress": 0, "ready": False,
+              "label": "AI 초기화 대기", "error": None, "device": None}
 _metadata_lock = threading.RLock()
 _metadata_initialized = False
 _last_target_refresh_time = 0.0
@@ -296,15 +305,25 @@ def process_detection_events(detected_names, frame, source_key=None, boxes=None)
 
 def _run_inference(frame):
     """Return one annotated result while safely sharing one model instance."""
-    global _model
+    global _model, _model_device
     # One model + lock protects mutable PyTorch/Ultralytics inference state and
     # avoids loading the same weights once per source.
     with _model_inference_lock:
         if _model is None:
             model_path = runtime_settings.readable_file("SSA_YOLO_MODEL_PATH", runtime_settings.YOLO_MODEL_PATH)
-            _model = YOLO(str(model_path))
+            _set_ai_status("CUDA_CHECKING", 25, "추론 장치 및 CUDA 연산 확인")
+            device = resolve_device(runtime_settings.YOLO_DEVICE, torch)
+            _set_ai_status("MODEL_LOADING", 45, "커스텀 YOLO 모델 로딩")
+            model = YOLO(str(model_path))
+            model.to(device)
+            if set(model.names.values()) != set(YOLO_TO_CODE):
+                raise RuntimeError("Custom YOLO class names do not match the animal/danger event classes")
+            _model = model
+            _model_device = device
             print("[YOLO] shared model loaded")
-        results = _model(frame, conf=runtime_settings.YOLO_CONFIDENCE, verbose=False)
+        if not get_ai_runtime_status()["ready"]:
+            _set_ai_status("INFERENCE_WARMUP", 70, "커스텀 모델 실제 추론 확인")
+        results = _model(frame, conf=runtime_settings.YOLO_CONFIDENCE, device=_model_device, verbose=False)
 
     detected_names = []
     boxes_for_client = []
@@ -333,6 +352,54 @@ def _run_inference(frame):
     return result.plot(), detected_names, boxes_for_client
 
 
+def _set_ai_status(stage, progress, label, **details):
+    with _ai_status_lock:
+        _ai_status.update(stage=stage, progress=progress, label=label, **details)
+
+
+def get_ai_runtime_status():
+    """Cached status only: a health request must never initialize CUDA/model IO."""
+    with _ai_status_lock:
+        return dict(_ai_status)
+
+
+def initialize_ai_runtime():
+    """Load the one shared model and prove inference before declaring readiness."""
+    with _model_inference_lock:
+        if get_ai_runtime_status()["ready"]:
+            return get_ai_runtime_status()
+        try:
+            _set_ai_status("INFERENCE_WARMUP", 60, "커스텀 모델 실제 추론 확인", ready=False, error=None)
+            _run_inference(np.zeros((640, 640, 3), dtype=np.uint8))
+            actual = str(next(_model.model.parameters()).device)
+            if actual != _model_device:
+                raise RuntimeError("The model device differs from SSA_YOLO_DEVICE")
+            if _model_device.startswith("cuda:"):
+                torch.cuda.synchronize(_model_device)
+            _set_ai_status("AI_READY", 90, "커스텀 모델 추론 준비 완료", ready=True,
+                           device=_model_device, classes=dict(_model.names), error=None)
+            return get_ai_runtime_status()
+        except Exception as error:
+            _set_ai_status("AI_FAILED", 0, "AI 초기화 실패", ready=False, error=str(error))
+            raise
+
+
+def shutdown_ai_runtime():
+    """Join capture owners before releasing their one shared GPU model."""
+    global _model, _model_device
+    statuses = stop_all_workers()
+    if any(status["running"] or status.get("stopping", False) for status in statuses.values()):
+        raise RuntimeError("YOLO workers are still stopping; shared GPU resources were retained")
+    with _model_inference_lock:
+        device = _model_device
+        _model = None
+        _model_device = None
+        gc.collect()
+        if device and device.startswith("cuda:"):
+            torch.cuda.empty_cache()
+        _set_ai_status("AI_IDLE", 0, "AI 중지", ready=False, device=None, error=None)
+
+
 class SourceWorker:
     """Own one VideoCapture and the latest completed YOLO result for a source."""
 
@@ -350,6 +417,7 @@ class SourceWorker:
         self.last_error = None
         self.last_frame_at = None
         self.frame_sequence = 0
+        self.last_processing_ms = None
         self._esp32_retry_delay = runtime_settings.ESP32_RECONNECT_INITIAL_SECONDS
 
     def start(self):
@@ -360,7 +428,8 @@ class SourceWorker:
                 runtime_settings.readable_file("SSA_YOLO_MODEL_PATH", runtime_settings.YOLO_MODEL_PATH)
                 if self.mode != "esp32":
                     runtime_settings.readable_file(f"SSA_{self.source_key.upper()}_PATH", self.uri)
-            except runtime_settings.RuntimePathError as error:
+                initialize_ai_runtime()
+            except Exception as error:
                 self._set_error(error)
                 print(f"[YOLO:{self.source_key}] configuration error: {error}")
                 return False
@@ -421,6 +490,7 @@ class SourceWorker:
                 "frame_ready": self.latest_frame is not None,
                 "last_frame_at": self.last_frame_at,
                 "frame_sequence": self.frame_sequence,
+                "last_processing_ms": self.last_processing_ms,
                 "last_error": self.last_error,
             }
 
@@ -513,6 +583,7 @@ class SourceWorker:
                         break
                     self._reset_retry_delay()
                     try:
+                        processing_started = time.perf_counter()
                         annotated_frame, detected_names, boxes = _run_inference(frame)
                         if self.stop_event.is_set():
                             break
@@ -525,6 +596,8 @@ class SourceWorker:
                         if self.stop_event.is_set():
                             break
                         self._publish(annotated_frame, boxes)
+                        with self.frame_lock:
+                            self.last_processing_ms = (time.perf_counter() - processing_started) * 1000
                     except Exception as error:
                         self._set_error(error)
                         print(f"[YOLO:{self.source_key}] inference error: {error}")
@@ -692,4 +765,4 @@ def video_capture_and_detect():
 ai_thread = None
 if runtime_settings.AUTO_START_DETECTION_WORKERS:
     start_all_workers()
-atexit.register(stop_all_workers)
+atexit.register(shutdown_ai_runtime)

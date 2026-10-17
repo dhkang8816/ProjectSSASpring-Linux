@@ -234,11 +234,15 @@ SEQ_PDF_CACHE
 
 ### Linux / WSL2 경로 설정
 
+최신 운영 권한·systemd 적용 및 SQLite 분리 결과는 [Linux 실행 권한 안내](LINUX_RUNTIME_PERMISSIONS.md)를 참고합니다. 운영 기본값은 SQLite 없는 `SSA_FLASK_PROFILE=ai`이며 기존 Flask 로그인·CRUD 화면은 명시적 `local` 모드로 보존합니다.
+
+검증된 Python 3.11 / PyTorch CUDA 12.6 / 커스텀 YOLOv8n 설치와 GPU·Flask 생명주기 검사 결과는 [GPU 실행 환경 안내](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md)를 참고합니다. 실제 운영 Tomcat·ESP32 관제 검증과 개발 계정의 격리 GPU 검사는 구분합니다.
+
 전체 사용처·복사 파일의 출처·남은 운영 작업은 [경로 점검 문서](PATH_CONFIGURATION_LINUX.md)를 참고합니다.
-업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`입니다. 기본 경로를 제안하고 코드에서 계산하며 운영 디렉터리 생성·권한 변경·데이터 이동은 하지 않습니다.
+업로드 기본값은 `/var/lib/project-ssa/uploads`, PDF 캐시 기본값은 `/var/cache/project-ssa`입니다. 설정 로딩은 디렉터리를 생성하지 않습니다. 현재 WSL 운영 환경에는 사용자 승인으로 전용 디렉터리·ACL·systemd 쓰기 예외를 적용했습니다.
 
 - Spring과 Flask의 공유 업로드는 `SSA_UPLOAD_ROOT`, Spring PDF 캐시는 `SSA_CACHE_ROOT`로 재정의합니다. 경로는 절대경로여야 하며 없는 디렉터리를 설정 로딩이나 점검만으로 생성하지 않습니다. Windows는 기존 업로드 기본값과 업로드 루트 아래 PDF 캐시 기본 위치를 유지합니다.
-- 외부 모델·영상·DB는 `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`, `SSA_SQLITE_PATH`로 명시해야 합니다. 미설정 파일 경로를 추측하거나 빈 운영 DB를 생성하지 않습니다. Python 상대 파일 경로는 **저장소 루트** 기준이며 `project_ssa_yolo/` 기준이 아닙니다.
+- 외부 모델·영상은 `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`로 명시해야 합니다. `SSA_SQLITE_PATH`는 기존 Flask 화면을 쓰는 `local` 모드에서만 필요합니다. 미설정 파일 경로를 추측하거나 빈 운영 DB를 생성하지 않습니다. Python 상대 파일 경로는 **저장소 루트** 기준이며 `project_ssa_yolo/` 기준이 아닙니다.
 - Flask는 프로젝트 루트 `.env`를 설정 import 전에 읽습니다. 프로세스 환경변수가 `.env`보다 우선하므로 Windows에서 복사한 로컬 설정을 Linux 실행 환경에서 덮어쓸 수 있습니다. Spring은 `.env`를 읽지 않으며 JVM 속성이 환경변수보다 우선합니다.
 - `SSA_ESP32_COM_PORT`는 해당 OS의 실제 장치로 지정합니다. Linux에서 Windows COM 이름이나 임의 USB 기본값을 사용하지 않습니다. HTTP 스트림은 별도 `SSA_ESP32_STREAM_URL`입니다.
 - systemd로 실행하는 Tomcat에는 일반 셸의 환경변수가 자동 전달되지 않습니다. 외부 저장소는 공유 권한과 Tomcat `ProtectSystem`/`ReadWritePaths` 제한을 함께 검토해야 합니다. 운영 설정 변경·재시작은 별도 작업입니다.
@@ -283,7 +287,8 @@ Copy-Item .env.example .env
 | Flask | `FLASK_APP`, `FLASK_RUN_HOST`, `FLASK_RUN_PORT`, `FLASK_RUN_EXTRA_ARGS`, `SSA_FLASK_SECRET_KEY`, `SSA_FLASK_CSRF_SECRET_KEY`, `SSA_FLASK_CONTROL_TOKEN` |
 | Spring callback | `SSA_SPRING_HOST` |
 | 영상/모델 | `SSA_YOLO_MODEL_PATH`, `SSA_VIDEO_1_PATH`, `SSA_VIDEO_2_PATH`, `SSA_VIDEO_3_PATH`, `SSA_ESP32_STREAM_URL`, `SSA_DEFAULT_VIDEO_SOURCE`, `SSA_YOLO_CONFIDENCE` |
-| SQLite | `SSA_SQLITE_PATH` (기존 파일을 사용하는 외부 저장소), `SSA_TEST_SQLITE_PATH` (테스트 전용) |
+| GPU / 선택 worker | `SSA_YOLO_DEVICE` (기본 `cuda:0`, CPU는 명시 설정), `SSA_OPTIONAL_IO_ENABLED` (USB·Discord worker 시작 여부) |
+| Flask 모드 / SQLite | `SSA_FLASK_PROFILE` (기본 `ai`), `SSA_SQLITE_PATH` (`local` 전용 기존 DB), `SSA_TEST_SQLITE_PATH` (테스트 전용) |
 | ESP32 | `SSA_ESP32_COM_PORT`, `SSA_ESP32_STREAM_URL`, `SSA_ESP32_HTTP_CONNECT_TIMEOUT_SECONDS`, `SSA_ESP32_HTTP_READ_TIMEOUT_SECONDS`, `SSA_ESP32_MJPEG_BUFFER_MAX_BYTES`, `SSA_ESP32_RECONNECT_INITIAL_SECONDS`, `SSA_ESP32_RECONNECT_MAX_SECONDS` |
 | 배터리 보정 | `SSA_BATTERY_ENABLED`, `SSA_BATTERY_SOURCE_KEY`, `SSA_BATTERY_ADC_PIN`, `SSA_BATTERY_ADC_REFERENCE_VOLTAGE`, `SSA_BATTERY_MIN_VOLTAGE`, `SSA_BATTERY_MAX_VOLTAGE`, `SSA_BATTERY_DIVIDER_RATIO`, `SSA_BATTERY_CALIBRATION`, `SSA_BATTERY_SAMPLE_COUNT` |
 | 배터리 상태/테스트 | `SSA_BATTERY_LOW_PERCENT`, `SSA_BATTERY_CRITICAL_PERCENT`, `SSA_BATTERY_MOCK_ENABLED`, `SSA_BATTERY_MOCK_PERCENT`, `SSA_BATTERY_DEBUG`, `SSA_BATTERY_DEBUG_INTERVAL_SECONDS` |
@@ -342,13 +347,17 @@ Linux에서는 실제 경로·주소 환경변수와 실행 의존성을 준비�
 cd project_ssa_yolo
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu126
+python -m pip install -r requirements-linux-cu126.lock.txt
+python -m pip check
 python run_server.py
 ```
 
 Python 실행 파일과 설치된 패키지/GPU 구성은 환경별로 확인해야 합니다. `.env`, `jdbc.properties`가 이미 있다면 예시 파일로 덮어쓰지 않습니다.
 
-`run_server.py`는 `.env`를 읽고 `create_app("local")`을 실행합니다. OpenCV/FFmpeg/serial worker 중복을 막기 위해 reloader 없이 단일 threaded Werkzeug 서버로 실행됩니다. YOLO 모델과 영상 파일은 `.env`의 경로에 실제로 준비되어 있어야 합니다.
+`run_server.py`는 `.env`를 읽고 `SSA_FLASK_PROFILE`에 따라 앱을 생성하며 기본값은 `ai`입니다. AI 모드는 SQLite 엔진과 기존 DB 화면을 초기화하지 않고 영상·YOLO·Spring 연동을 제공합니다. 기존 Flask 로그인·CRUD 화면은 `SSA_FLASK_PROFILE=local`과 기존 `SSA_SQLITE_PATH`를 명시해 실행합니다. OpenCV/FFmpeg/serial worker 중복을 막기 위해 reloader 없이 단일 threaded Werkzeug 서버로 실행됩니다. YOLO 모델·영상은 실제 파일로 지정해야 합니다. CUDA 요청 실패 시 CPU로 자동 전환하지 않으며 Spring 시작 제어는 HTTP 응답과 실제 모델 추론 준비를 구분합니다.
+
+상태·Discord 미발송 진단과 수정 근거는 [GPU 환경 문서의 영상 연동 후 진단](project_ssa_yolo/GPU_ENVIRONMENT_LINUX.md#영상-연동-후-상태알림-진단-및-수정-2026-10-17)을 참고합니다. health는 실제 AI 준비와 worker/콜백 결과를 읽기 전용으로 제공하며 제어 토큰 없이도 AI 준비를 조회합니다. 시작·종료 권한은 계속 제어 토큰과 관리자 권한으로 제한합니다.
 
 #### 메뉴 Flask ON/OFF 제어 (로컬 개발 환경 전용)
 
