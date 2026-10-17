@@ -40,3 +40,29 @@ Thumbs.db
 # Logs
 **/logs/
 **/*.log
+
+# Eclipse workspace
+.metadata/
+
+# Eclipse generated files
+**/.recommenders/
+
+# Java / Maven
+**/target/
+**/build/
+**/*.class
+
+# Python additional cache
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Local configuration
+**/.env.*
+!**/.env.example
+
+# Linux temporary files
+*~
+*.swp
+*.swo
+# Eclipse server configuration
+Servers/
